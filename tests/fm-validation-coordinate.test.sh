@@ -126,6 +126,29 @@ FM_HOME="$MATE_A" "$ROOT/bin/fm-validation-coordinate.sh" claim run-1 "$CORR" "$
 [ "$(grep -c "exclusively claimed" "$PARENT/state/mate-a.status")" -eq 2 ] \
   || fail "a recovered report receipt did not suppress the next claim report"
 
+# A claim binds exactly one head. When the same coordinator, worker home and
+# task retry after the worker committed again, the refusal names the advanced
+# head instead of blaming another owner, and the claim keeps its bound head.
+CLAIMED_HEAD=$(git -C "$WORKTREE" rev-parse HEAD)
+printf 'advanced\n' >> "$WORKTREE/input"
+git -C "$WORKTREE" commit -qam advanced
+ADVANCED_HEAD=$(git -C "$WORKTREE" rev-parse HEAD)
+set +e
+ADVANCED=$(FM_HOME="$MATE_A" "$ROOT/bin/fm-validation-coordinate.sh" claim run-1 "$CORR" "$WORKER" validator 2>&1)
+RC=$?
+set -e
+[ "$RC" -ne 0 ] || fail "an advanced worker head was adopted by the existing claim"
+assert_contains "$ADVANCED" "the worker advanced to $ADVANCED_HEAD" \
+  "advanced-head refusal did not name the new head"
+case "$ADVANCED" in
+  *"already has a different owner"*) fail "an own-claim retry was blamed on a different owner" ;;
+esac
+[ "$(sed -n 's/^head=//p' "$PARENT/state/validation-runs/run-1.claim")" = "$CLAIMED_HEAD" ] \
+  || fail "a refused claim retry rebound the run to the advanced head"
+[ "$(grep -c "exclusively claimed" "$PARENT/state/mate-a.status")" -eq 2 ] \
+  || fail "a refused claim retry reported progress"
+git -C "$WORKTREE" reset -q --hard "$CLAIMED_HEAD"
+
 MATE_COPY="$TMP_ROOT/mate-a-copy"
 mkdir -p "$MATE_COPY/state"
 printf 'mate-a\n' > "$MATE_COPY/.fm-secondmate-home"
