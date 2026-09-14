@@ -65,7 +65,11 @@ fm_local_clean() {
 }
 
 fm_local_context() { # child-home task-id; output FM_LOCAL_* identity globals
-  local child=$1 task=$2 parent mate project name other other_wt other_top common mode
+  fm_local_context_records "$1" "$2" && fm_local_worktree_binding
+}
+
+fm_local_context_records() { # every binding except the worker checkout
+  local child=$1 task=$2 parent mate project name common mode
   fm_pr_task_id_valid "$task" || return 1
   fm_local_dir "$child" && fm_local_dir "$child/state" && fm_local_dir "$child/data" \
     && fm_local_dir "$child/config" && fm_local_dir "$child/projects" || return 1
@@ -101,13 +105,20 @@ fm_local_context() { # child-home task-id; output FM_LOCAL_* identity globals
   [ "$(fm_local_gitdir "$project")" != "$common" ] || return 1
   mode=$(FM_HOME="$parent" FM_DATA_OVERRIDE="$parent/data" "$_FM_LOCAL_LIB_DIR/fm-project-mode.sh" "$name") || return 1
   [ "${mode%% *}" = local-only ] || return 1
+  FM_LOCAL_PARENT=$parent FM_LOCAL_CHILD=$child FM_LOCAL_MATE=$mate FM_LOCAL_TASK=$task
+  FM_LOCAL_CLONE=$project FM_LOCAL_COMMON=$common
+  FM_LOCAL_DEFAULT=$(fm_local_default "$FM_LOCAL_PROJECT") || return 1
+}
+
+fm_local_worktree_binding() { # the task's own worker checkout, exclusively
+  local other other_wt other_top
   FM_LOCAL_WT=$(fm_local_field "$FM_LOCAL_META" worktree) || return 1
   fm_local_dir "$FM_LOCAL_WT" || return 1
   [ "$(git -C "$FM_LOCAL_WT" rev-parse --show-toplevel)" = "$FM_LOCAL_WT" ] || return 1
-  [ "$(fm_local_gitdir "$FM_LOCAL_WT")" = "$(fm_local_gitdir "$project")" ] || return 1
-  [ "$FM_LOCAL_WT" != "$project" ] || return 1
+  [ "$(fm_local_gitdir "$FM_LOCAL_WT")" = "$(fm_local_gitdir "$FM_LOCAL_CLONE")" ] || return 1
+  [ "$FM_LOCAL_WT" != "$FM_LOCAL_CLONE" ] || return 1
   # A second task record cannot own this same worker checkout.
-  for other in "$child"/state/*.meta; do
+  for other in "$FM_LOCAL_CHILD"/state/*.meta; do
     [ "$other" = "$FM_LOCAL_META" ] && continue
     fm_local_file "$other" || return 1
     if ! other_wt=$(fm_local_field "$other" worktree 2>/dev/null); then
@@ -119,9 +130,6 @@ fm_local_context() { # child-home task-id; output FM_LOCAL_* identity globals
     other_top=$(git -C "$other_wt" rev-parse --show-toplevel) || return 1
     [ "$other_top" != "$FM_LOCAL_WT" ] || fm_local_error "duplicate task ownership of $FM_LOCAL_WT" || return 1
   done
-  FM_LOCAL_PARENT=$parent FM_LOCAL_CHILD=$child FM_LOCAL_MATE=$mate FM_LOCAL_TASK=$task
-  FM_LOCAL_CLONE=$project FM_LOCAL_COMMON=$common
-  FM_LOCAL_DEFAULT=$(fm_local_default "$FM_LOCAL_PROJECT") || return 1
 }
 
 fm_local_identity() { # full-ready-head base-head bundle-sha256
@@ -173,6 +181,62 @@ fm_local_landed() { # child-home task-id; read-only teardown guard
   git -C "$FM_LOCAL_CLONE" merge-base --is-ancestor "$head" "refs/heads/$FM_LOCAL_DEFAULT" || return 1
   git -C "$FM_LOCAL_PROJECT" merge-base --is-ancestor "$head" "refs/heads/$FM_LOCAL_DEFAULT"
 }
+
+fm_local_landed_receipt() { # child-home task-id; proof without the worker checkout
+  local ready_root ready head
+  fm_local_context_records "$1" "$2" || return 1
+  ready_root="$FM_LOCAL_CHILD/data/$FM_LOCAL_TASK/local-ready/$FM_LOCAL_GENERATION_KEY"
+  fm_local_dir "$ready_root" || return 1
+  for ready in "$ready_root"/*; do
+    fm_local_dir "$ready" || continue
+    head=${ready##*/}
+    FM_LOCAL_WT=$(fm_local_field "$ready/identity" worktree) || continue
+    fm_local_artifact "$head" || continue
+    fm_local_file "$FM_LOCAL_RECEIPT" && cmp -s "$ready/identity" "$FM_LOCAL_RECEIPT" || continue
+    git -C "$FM_LOCAL_CLONE" merge-base --is-ancestor "$head" "refs/heads/$FM_LOCAL_DEFAULT" || continue
+    git -C "$FM_LOCAL_PROJECT" merge-base --is-ancestor "$head" "refs/heads/$FM_LOCAL_DEFAULT" || continue
+    return 0
+  done
+  return 1
+}
+
+# A child clone has no remote, so a parent default advanced by any other task is
+# unreachable until it is carried across locally. This fast-forwards the clone's
+# own default only: it never writes the parent, the worker checkout, or fm/<task>,
+# and it leaves the worker's rebase onto the new base explicit.
+fm_local_refresh() ( # child-home task-id
+  set -eu
+  local child=$1 task=$2 lock tmp='' base clone_default imported
+  fm_local_context "$child" "$task" || { fm_local_error 'invalid child task or parent/project binding'; exit 1; }
+  lock="$FM_LOCAL_CHILD/state/.control-$task.lock"
+  local_refresh_cleanup() {
+    [ -z "$tmp" ] || rm -rf -- "$tmp"
+    fm_lock_release "$lock" || true
+  }
+  fm_lock_acquire_wait "$lock"
+  trap local_refresh_cleanup EXIT
+  fm_local_context "$child" "$task" || exit 1
+  fm_local_clean "$FM_LOCAL_CLONE" || exit 1
+  [ "$(git -C "$FM_LOCAL_CLONE" symbolic-ref --quiet --short HEAD)" = "$FM_LOCAL_DEFAULT" ] \
+    || { fm_local_error 'child clone is not on its default branch'; exit 1; }
+  base=$(git -C "$FM_LOCAL_PROJECT" rev-parse --verify "refs/heads/$FM_LOCAL_DEFAULT") || exit 1
+  clone_default=$(git -C "$FM_LOCAL_CLONE" rev-parse --verify "refs/heads/$FM_LOCAL_DEFAULT") || exit 1
+  if [ "$clone_default" != "$base" ]; then
+    tmp=$(mktemp -d "$FM_LOCAL_CHILD/data/$task/.refresh.XXXXXX")
+    # Local object transfer only: no remote, no refspec, no FETCH_HEAD.
+    git -C "$FM_LOCAL_PROJECT" bundle create "$tmp/default.bundle" "refs/heads/$FM_LOCAL_DEFAULT" >/dev/null 2>&1 || exit 1
+    git -C "$FM_LOCAL_CLONE" bundle verify "$tmp/default.bundle" >/dev/null || exit 1
+    imported=$(git -C "$FM_LOCAL_CLONE" bundle unbundle "$tmp/default.bundle") || exit 1
+    [ "$imported" = "$base refs/heads/$FM_LOCAL_DEFAULT" ] || exit 1
+    git -C "$FM_LOCAL_CLONE" merge-base --is-ancestor "$clone_default" "$base" \
+      || { fm_local_error 'child default diverged from the parent default; nothing was moved'; exit 1; }
+    git -C "$FM_LOCAL_CLONE" -c core.hooksPath=/dev/null merge --ff-only "$base" >/dev/null || exit 1
+    [ "$(git -C "$FM_LOCAL_CLONE" rev-parse HEAD)" = "$base" ] || exit 1
+  fi
+  fm_local_clean "$FM_LOCAL_CLONE" || exit 1
+  printf 'refreshed mate=%s task=%s default=%s base=%s worker=%s\n' \
+    "$FM_LOCAL_MATE" "$task" "$FM_LOCAL_DEFAULT" "$base" "$FM_LOCAL_WT"
+)
 
 fm_local_land() ( # parent-home mate-id task-id approved-full-head
   set -eu

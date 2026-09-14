@@ -344,6 +344,58 @@ test_child_default_refusals_preserve_both_repositories() {
   pass "dirty or diverged child default branches refuse before parent landing and preserve both repositories"
 }
 
+run_refresh() { # <world>
+  FM_HOME="$1/child" FM_ROOT_OVERRIDE="$ROOT" \
+    "$ROOT/bin/fm-local-refresh.sh" local-task
+}
+
+test_parent_advance_is_reachable_through_refresh() {
+  local world parent child base refreshed rc head ready_out
+
+  world=$(make_world parent-advance)
+  parent="$world/parent"
+  child="$world/child"
+
+  printf 'parent work\n' > "$parent/projects/alpha/parent.txt"
+  git -C "$parent/projects/alpha" add parent.txt
+  git -C "$parent/projects/alpha" commit -qm 'another task landed in the parent'
+  base=$(git -C "$parent/projects/alpha" rev-parse HEAD)
+
+  set +e
+  run_ready "$world" > "$world/ready.out" 2> "$world/ready.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "readiness accepted a head that predates the advanced parent default"
+
+  refreshed=$(run_refresh "$world") || fail "refresh failed after the parent default advanced"
+  assert_contains "$refreshed" "base=$base" "refresh did not report the new parent base"
+  assert_equals "$base" "$(git -C "$child/projects/alpha" rev-parse refs/heads/main)" \
+    "refresh did not carry the advanced parent default into the child clone"
+  assert_equals "$base" "$(git -C "$parent/projects/alpha" rev-parse refs/heads/main)" \
+    "refresh moved the parent project"
+  [ -z "$(git -C "$child/projects/alpha" remote)" ] || fail "refresh gave the child clone a remote"
+
+  run_refresh "$world" >/dev/null || fail "a repeated refresh was not safe to retry"
+  assert_equals "$base" "$(git -C "$child/projects/alpha" rev-parse refs/heads/main)" \
+    "a repeated refresh moved the child default again"
+
+  set +e
+  run_ready "$world" > "$world/ready2.out" 2> "$world/ready2.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "refresh rebased the worker instead of leaving that explicit"
+
+  git -C "$world/worker" rebase --quiet "$base" || fail "worker could not rebase onto the refreshed base"
+  ready_out=$(run_ready "$world") || fail "readiness failed after an explicit rebase onto the refreshed base"
+  head=$(git -C "$world/worker" rev-parse HEAD)
+  assert_contains "$ready_out" "head=$head" "readiness did not report the rebased head"
+  run_land "$world" "$head" >/dev/null 2> "$world/land.err" \
+    || fail "landing failed after refresh and rebase: $(cat "$world/land.err")"
+  assert_equals "$head" "$(git -C "$parent/projects/alpha" rev-parse refs/heads/main)" \
+    "landing did not fast-forward the parent default to the rebased head"
+  pass "a parent default advanced by another task is reachable through an explicit local refresh and rebase"
+}
+
 test_teardown_refuses_missing_or_advanced_worker() {
   local world head later rc ready_out artifact
 
@@ -399,7 +451,26 @@ test_teardown_refuses_missing_or_advanced_worker() {
     "reassigned-slot refusal touched the new owner's slot claim"
   assert_present "$world/worker/feature.txt" \
     "reassigned-slot refusal removed the reassigned checkout"
-  pass "teardown preserves a missing worker record, a newer task branch beyond the receipted head, and a reassigned slot"
+
+  head=$(git -C "$world/worker" rev-parse HEAD)
+  run_land "$world" "$head" >/dev/null 2> "$world/land.err" \
+    || fail "reassigned-slot: landing failed: $(cat "$world/land.err")"
+  : > "$TMP_ROOT/treehouse-state.json"
+  set +e
+  run_child_teardown "$world" > "$world/teardown2.out" 2> "$world/teardown2.err"
+  rc=$?
+  set -e
+  rm -f "$TMP_ROOT/treehouse-state.json"
+  [ "$rc" -eq 0 ] || fail "a landed task with a reassigned slot was stranded: $(cat "$world/teardown2.err")"
+  assert_absent "$world/child/state/local-task.meta" \
+    "landed reassigned-slot teardown left its task record behind"
+  assert_present "$world/.fm-slot-owner" \
+    "landed reassigned-slot teardown removed the new owner's slot claim"
+  assert_present "$world/worker/feature.txt" \
+    "landed reassigned-slot teardown removed the reassigned checkout"
+  assert_present "$(receipt_for "$world" "$artifact")" \
+    "landed reassigned-slot teardown removed the parent landing receipt"
+  pass "teardown preserves a missing worker record, a newer task branch beyond the receipted head, and an unlanded reassigned slot while a landed one still cleans up"
 }
 
 test_reused_task_same_head_has_distinct_delivery_identity() {
@@ -615,6 +686,7 @@ case ${FM_LOCAL_DELIVERY_TEST_CASE:-all} in
     test_child_sync_failure_is_receipted_and_retryable
     test_child_default_refusals_preserve_both_repositories
     test_teardown_refuses_missing_or_advanced_worker
+    test_parent_advance_is_reachable_through_refresh
     test_reused_task_same_head_has_distinct_delivery_identity
     test_landing_refusals_preserve_work
     ;;

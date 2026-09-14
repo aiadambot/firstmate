@@ -3290,10 +3290,14 @@ if [ "$KIND" = ship ] && [ "$MODE" = local-only ] && [ "$FORCE" != "--force" ] \
     && { [ ! -d "$WT" ] || ! teardown_owns_worktree; }; then
   if teardown_owns_worktree; then
     echo "REFUSED: local-only child $ID has no inspectable worker checkout; cannot prove parent landing." >&2
-  else
-    echo "REFUSED: local-only child $ID's recorded worktree ${WT:-<missing>} now belongs to task ${TEARDOWN_SLOT_REASSIGNED_TO:-another task}, so parent landing cannot be proved; that slot is left untouched and this task's ready work is preserved." >&2
+    exit 1
   fi
-  exit 1
+  # shellcheck source=bin/fm-local-delivery-lib.sh
+  . "$SCRIPT_DIR/fm-local-delivery-lib.sh"
+  fm_local_landed_receipt "$FM_HOME" "$ID" || {
+    echo "REFUSED: local-only child $ID's recorded worktree ${WT:-<missing>} now belongs to task ${TEARDOWN_SLOT_REASSIGNED_TO:-another task}, and no retained ready identity has a matching parent landing receipt, so parent landing cannot be proved; that slot is left untouched and this task's ready work is preserved." >&2
+    exit 1
+  }
 fi
 
 if teardown_owns_worktree && [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
