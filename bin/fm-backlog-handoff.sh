@@ -99,6 +99,8 @@ MAIN_BACKLOG="$DATA/backlog.md"
 . "$SCRIPT_DIR/fm-public-followup-lib.sh"
 # shellcheck source=bin/fm-pending-reply-lib.sh
 . "$SCRIPT_DIR/fm-pending-reply-lib.sh"
+# shellcheck source=bin/fm-local-delivery-lib.sh
+. "$SCRIPT_DIR/fm-local-delivery-lib.sh"
 
 RECEIVER_WAKE_MESSAGE='New routed work is in your backlog. Run bin/fm-session-start.sh now, then act on the routed task.'
 
@@ -339,15 +341,6 @@ registry_has_project() {
   return 1
 }
 
-canonical_git_common_dir() {
-  local repo=$1 common
-  common=$(git -C "$repo" rev-parse --git-common-dir 2>/dev/null) || return 1
-  case "$common" in
-    /*) cd "$common" && pwd -P ;;
-    *) cd "$repo/$common" && pwd -P ;;
-  esac
-}
-
 validate_local_only_item_route() { # <secondmate-id> <backlog> <key> <remote:0|1> [local-home]
   local id=$1 backlog=$2 key=$3 remote=$4 home=${5:-} project mode projects source child
   local expected_source expected_git_dir actual_source actual_git_dir parent_home source_top child_top child_git_dir
@@ -383,7 +376,7 @@ EOF
     return 1
   }
   expected_source=$(cd "$source" && pwd -P)
-  expected_git_dir=$(canonical_git_common_dir "$source") || return 1
+  expected_git_dir=$(fm_local_gitdir "$source" 2>/dev/null) || return 1
   source_top=$(git -C "$source" rev-parse --show-toplevel 2>/dev/null) || return 1
   [ "$(cd "$source_top" && pwd -P)" = "$expected_source" ] || {
     echo "error: local-only parent project $project is nested inside another git worktree" >&2
@@ -394,7 +387,7 @@ EOF
     echo "error: local-only project $project in secondmate $id is nested inside another git worktree" >&2
     return 1
   }
-  child_git_dir=$(canonical_git_common_dir "$child") || return 1
+  child_git_dir=$(fm_local_gitdir "$child" 2>/dev/null) || return 1
   [ "$child_git_dir" != "$expected_git_dir" ] || {
     echo "error: local-only project $project in secondmate $id shares the parent project's git directory" >&2
     return 1

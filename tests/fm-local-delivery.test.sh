@@ -345,7 +345,7 @@ test_child_default_refusals_preserve_both_repositories() {
 }
 
 test_teardown_refuses_missing_or_advanced_worker() {
-  local world head later rc
+  local world head later rc ready_out artifact
 
   world=$(make_world missing-worker)
   git -C "$world/child/projects/alpha" worktree remove --force "$world/worker"
@@ -377,7 +377,29 @@ test_teardown_refuses_missing_or_advanced_worker() {
     "advanced-branch refusal moved the detached receipted checkout"
   assert_present "$world/child/state/local-task.meta" \
     "advanced-branch refusal discarded the task metadata"
-  pass "teardown preserves a missing worker record and a newer task branch beyond the receipted head"
+
+  world=$(make_world reassigned-slot)
+  ready_out=$(run_ready "$world") || fail "reassigned-slot: ready failed"
+  artifact=$(ready_artifact "$ready_out")
+  : > "$TMP_ROOT/treehouse-state.json"
+  printf 'task=other-task\nhome=%s\n' "$world/child" > "$world/.fm-slot-owner"
+  set +e
+  run_child_teardown "$world" > "$world/teardown.out" 2> "$world/teardown.err"
+  rc=$?
+  set -e
+  rm -f "$TMP_ROOT/treehouse-state.json"
+  [ "$rc" -ne 0 ] || fail "a reassigned pool slot waived the parent landing proof"
+  assert_contains "$(cat "$world/teardown.err")" 'cannot be proved' \
+    "reassigned-slot refusal did not name the missing landing proof"
+  assert_present "$world/child/state/local-task.meta" \
+    "reassigned-slot refusal discarded the task metadata"
+  assert_present "$artifact/identity" \
+    "reassigned-slot refusal discarded the retained ready artifact"
+  assert_present "$world/.fm-slot-owner" \
+    "reassigned-slot refusal touched the new owner's slot claim"
+  assert_present "$world/worker/feature.txt" \
+    "reassigned-slot refusal removed the reassigned checkout"
+  pass "teardown preserves a missing worker record, a newer task branch beyond the receipted head, and a reassigned slot"
 }
 
 test_reused_task_same_head_has_distinct_delivery_identity() {

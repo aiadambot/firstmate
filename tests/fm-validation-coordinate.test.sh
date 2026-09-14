@@ -149,6 +149,29 @@ esac
   || fail "a refused claim retry reported progress"
 git -C "$WORKTREE" reset -q --hard "$CLAIMED_HEAD"
 
+# A worker that left the claimed branch is not a head advance, so the generic
+# stale-identity refusal stands instead of new-head re-routing advice.
+git -C "$WORKTREE" checkout -q -b other-validation
+printf 'other branch\n' >> "$WORKTREE/input"
+git -C "$WORKTREE" commit -qam other
+set +e
+SWITCHED=$(FM_HOME="$MATE_A" "$ROOT/bin/fm-validation-coordinate.sh" claim run-1 "$CORR" "$WORKER" validator 2>&1)
+RC=$?
+set -e
+[ "$RC" -ne 0 ] || fail "a switched worker branch was adopted by the existing claim"
+assert_contains "$SWITCHED" "already has a different owner" \
+  "a branch switch was not refused as a conflicting claim identity"
+case "$SWITCHED" in
+  *"advanced to"*) fail "a branch switch was reported as a head advance" ;;
+esac
+[ "$(sed -n 's/^branch=//p' "$PARENT/state/validation-runs/run-1.claim")" = validation ] \
+  || fail "a refused branch switch rebound the claim to another branch"
+[ "$(sed -n 's/^head=//p' "$PARENT/state/validation-runs/run-1.claim")" = "$CLAIMED_HEAD" ] \
+  || fail "a refused branch switch rebound the claim to another head"
+git -C "$WORKTREE" checkout -q validation
+git -C "$WORKTREE" branch -qD other-validation
+git -C "$WORKTREE" reset -q --hard "$CLAIMED_HEAD"
+
 MATE_COPY="$TMP_ROOT/mate-a-copy"
 mkdir -p "$MATE_COPY/state"
 printf 'mate-a\n' > "$MATE_COPY/.fm-secondmate-home"

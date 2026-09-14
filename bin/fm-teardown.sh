@@ -3287,8 +3287,12 @@ fi
 
 if [ "$KIND" = ship ] && [ "$MODE" = local-only ] && [ "$FORCE" != "--force" ] \
     && { [ -e "$FM_HOME/.fm-secondmate-home" ] || [ -L "$FM_HOME/.fm-secondmate-home" ]; } \
-    && [ ! -d "$WT" ]; then
-  echo "REFUSED: local-only child $ID has no inspectable worker checkout; cannot prove parent landing." >&2
+    && { [ ! -d "$WT" ] || ! teardown_owns_worktree; }; then
+  if teardown_owns_worktree; then
+    echo "REFUSED: local-only child $ID has no inspectable worker checkout; cannot prove parent landing." >&2
+  else
+    echo "REFUSED: local-only child $ID's recorded worktree ${WT:-<missing>} now belongs to task ${TEARDOWN_SLOT_REASSIGNED_TO:-another task}, so parent landing cannot be proved; that slot is left untouched and this task's ready work is preserved." >&2
+  fi
   exit 1
 fi
 

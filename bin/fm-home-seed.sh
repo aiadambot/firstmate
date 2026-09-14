@@ -51,6 +51,8 @@ SUB_HOME_PARENT_MARKER=".fm-secondmate-parent"
 . "$SCRIPT_DIR/fm-secondmate-charter-lib.sh"
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
+# shellcheck source=bin/fm-local-delivery-lib.sh
+. "$SCRIPT_DIR/fm-local-delivery-lib.sh"
 
 usage() {
   echo "usage: fm-home-seed.sh <id> <home|-> {<project>...|--no-projects}" >&2
@@ -384,28 +386,8 @@ source_origin_url() {
 
 local_project_identity() {
   local repo=$1 common
-  common=$(git -C "$repo" rev-parse --git-common-dir 2>/dev/null) || return 1
-  printf '%s\n' "$(resolved_path "$repo")"
-  case "$common" in
-    /*) resolved_path "$common" ;;
-    *) resolved_path "$repo/$common" ;;
-  esac
-}
-
-local_project_default_branch() {
-  local repo=$1 ref branch
-  ref=$(git -C "$repo" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
-  if [ -n "$ref" ]; then
-    printf '%s\n' "${ref#origin/}"
-    return
-  fi
-  for branch in main master; do
-    if git -C "$repo" show-ref --verify --quiet "refs/heads/$branch"; then
-      printf '%s\n' "$branch"
-      return
-    fi
-  done
-  return 1
+  common=$(fm_local_gitdir "$repo" 2>/dev/null) || return 1
+  printf '%s\n%s\n' "$(resolved_path "$repo")" "$common"
 }
 
 validate_local_project_source() {
@@ -433,7 +415,7 @@ validate_local_project_source() {
     echo "error: local-only project $project must be checked out on its canonical default branch before seeding" >&2
     return 1
   }
-  default_branch=$(local_project_default_branch "$src") || {
+  default_branch=$(fm_local_default "$src") || {
     echo "error: could not resolve the canonical default branch for local-only project $project" >&2
     return 1
   }

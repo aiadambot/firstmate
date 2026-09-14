@@ -267,17 +267,13 @@ cmd_claim() {
   if [ -e "$CLAIM" ]; then
     safe_file "$CLAIM" || rc=1
     [ "$rc" -ne 0 ] || cmp -s "$tmp" "$CLAIM" || rc=1
-    rm -f "$tmp"
-    if [ "$rc" -ne 0 ]; then
-      if safe_file "$CLAIM" \
-        && [ "$(field "$CLAIM" coordinator_home)" = "$(canonical_dir "$FM_HOME")" ] \
-        && [ "$(field "$CLAIM" worker_home)" = "$worker_home" ] \
-        && [ "$(field "$CLAIM" task)" = "$task" ] \
-        && [ "$(field "$CLAIM" head)" != "$head" ]; then
-        die "validation run '$run' is bound to head $(field "$CLAIM" head); the worker advanced to $head - re-route the claim for the new head"
-      fi
-      die "validation run '$run' already has a different owner"
+    if [ "$rc" -ne 0 ] && safe_file "$CLAIM" \
+      && sed "s|^head=.*|head=$head|" "$CLAIM" | cmp -s - "$tmp"; then
+      rm -f "$tmp"
+      die "validation run '$run' is bound to head $(field "$CLAIM" head); the worker advanced to $head - re-route the claim for the new head"
     fi
+    rm -f "$tmp"
+    [ "$rc" -eq 0 ] || die "validation run '$run' already has a different owner"
   else
     mv "$tmp" "$CLAIM" || die "cannot publish validation claim"
   fi
