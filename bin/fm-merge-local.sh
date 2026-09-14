@@ -15,6 +15,10 @@
 # this entrypoint is invoked. The lock ends when the fast-forward returns;
 # docs/captain-hold-lifecycle.md owns the accepted merge-to-cleanup residual.
 # Usage: fm-merge-local.sh <task-id>
+#        fm-merge-local.sh --secondmate <mate-id> <task-id> <approved-full-head>
+# The second form consumes fm-local-ready.sh's immutable bundle and lands in the
+# parent's canonical local project, retaining a receipt for child cleanup.
+# Only the primary home may land; a secondmate clone merge is never delivery.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,7 +29,11 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 . "$SCRIPT_DIR/fm-pr-lib.sh"
 # shellcheck source=bin/fm-backlog-transition-lib.sh
 . "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
-if [ "$#" -ne 1 ] || ! fm_pr_task_id_valid "$1"; then
+if [ "${1:-}" = --secondmate ]; then
+  if [ "$#" -ne 4 ] || ! fm_pr_task_id_valid "$2" || ! fm_pr_task_id_valid "$3" || ! fm_pr_head_valid "$4"; then
+    echo "error: invalid secondmate local merge request" >&2; exit 2
+  fi
+elif [ "$#" -ne 1 ] || ! fm_pr_task_id_valid "$1"; then
   echo "error: invalid local merge request" >&2
   exit 2
 fi
@@ -46,6 +54,16 @@ META="$STATE/$ID.meta"
 # shellcheck source=bin/fm-lease-lib.sh
 . "$SCRIPT_DIR/fm-lease-lib.sh"
 fm_lease_forbid_branch "local-only landing (fm-merge-local)"
+if [ -e "$FM_HOME/.fm-secondmate-home" ] || [ -L "$FM_HOME/.fm-secondmate-home" ] || [ -n "${FM_TASK_ID:-}" ]; then
+  echo "error: local-only landing belongs to the primary Firstmate; report an immutable ready head" >&2
+  exit 1
+fi
+if [ "$ID" = --secondmate ]; then
+  # shellcheck source=bin/fm-local-delivery-lib.sh
+  . "$SCRIPT_DIR/fm-local-delivery-lib.sh"
+  fm_local_land "$FM_HOME" "$2" "$3" "$4"
+  exit $?
+fi
 
 [ -f "$META" ] || { echo "error: no meta for task $ID at $META" >&2; exit 1; }
 if ! fm_backlog_meta_spawn_gen_optional "$META" "$STATE"; then

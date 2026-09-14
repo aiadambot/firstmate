@@ -253,7 +253,8 @@ This task ships **local-only**: no remote, no PR, no pipeline.
 The task is complete only when committed on your branch \`fm/$id\`. Do NOT push, do NOT open a PR, do NOT merge.
 Keep your branch a clean fast-forward onto the current default branch - if \`main\` has advanced, rebase onto it so the eventual merge stays a fast-forward.
 When it is implemented and committed, append \`done: ready in branch fm/$id\` to the status file and stop.
-The configured merge authority approves the ready branch, then firstmate merges it into local \`main\` through the guarded fast-forward path.
+In a seeded local secondmate home, first run \`FM_HOME=<secondmate-home> bin/fm-local-ready.sh $id\` using Firstmate's code root, and include its full ready head in that status line.
+The configured merge authority approves the ready branch, then the primary Firstmate lands it through \`bin/fm-merge-local.sh\`; a secondmate clone's local merge is never parent delivery.
 EOF
       ;;
     no-mistakes)

@@ -1719,6 +1719,17 @@ validate_worktree_teardown_safety() {
     secondmate|scout) return 0 ;;
   esac
 
+  if [ "$MODE" = local-only ] && { [ -e "$FM_HOME/.fm-secondmate-home" ] || [ -L "$FM_HOME/.fm-secondmate-home" ]; }; then
+    # A child clone's default or remote reachability cannot prove parent landing.
+    # shellcheck source=bin/fm-local-delivery-lib.sh
+    . "$SCRIPT_DIR/fm-local-delivery-lib.sh"
+    fm_local_landed "$FM_HOME" "$ID" || {
+      echo "REFUSED: local-only child $ID has no matching parent landing receipt; preserve its ready work." >&2
+      return 1
+    }
+    return 0
+  fi
+
   if ! dirty_raw=$(git -C "$WT" status --porcelain 2>/dev/null); then
     if worktree_safety_blocked_by_lock "uncommitted changes"; then
       return "$TEARDOWN_WORKTREE_SAFETY_LOCK_BLOCKED"
@@ -3272,6 +3283,13 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ] &&
   fi
   require_orca_worktree_path_match "$ORCA_WORKTREE_ID" "$WT" || exit 1
   ORCA_PATH_MATCH_VERIFIED=1
+fi
+
+if [ "$KIND" = ship ] && [ "$MODE" = local-only ] && [ "$FORCE" != "--force" ] \
+    && { [ -e "$FM_HOME/.fm-secondmate-home" ] || [ -L "$FM_HOME/.fm-secondmate-home" ]; } \
+    && [ ! -d "$WT" ]; then
+  echo "REFUSED: local-only child $ID has no inspectable worker checkout; cannot prove parent landing." >&2
+  exit 1
 fi
 
 if teardown_owns_worktree && [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then

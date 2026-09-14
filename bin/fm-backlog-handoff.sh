@@ -22,6 +22,9 @@
 #   - moving only `## Queued` items, refusing `## In flight` and historical
 #     `## Done` records, which must stay with their home for pruning or
 #     archiving;
+#   - allowing a local-only item only on a local route whose registered project,
+#     parent binding, and nonpublishing seed identity all match; remote routes
+#     refuse local-only items before staging;
 #   - the multi-key classification and idempotent per-key reporting: a key
 #     already present in the secondmate backlog is reported and skipped, and if
 #     any key matches neither backlog nothing is moved;
@@ -88,6 +91,8 @@ MAIN_BACKLOG="$DATA/backlog.md"
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 # shellcheck source=bin/fm-secondmate-registry-lib.sh
 . "$SCRIPT_DIR/fm-secondmate-registry-lib.sh"
+# shellcheck source=bin/fm-secondmate-parent-lib.sh
+. "$SCRIPT_DIR/fm-secondmate-parent-lib.sh"
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-public-followup-lib.sh
@@ -297,6 +302,113 @@ backlog_key_section() {
     }
     END { exit found ? 0 : 1 }
   ' "$file"
+}
+
+backlog_key_repo() {
+  local file=$1 key=$2
+  [ -f "$file" ] || return 1
+  awk -v key="$key" '
+    /^- \[[ x]\] / {
+      rest = $0
+      sub(/^- \[[ x]\] +/, "", rest)
+      id = rest
+      sub(/[ \t].*/, "", id)
+      if (id != key) next
+      if (match($0, /\(repo:[[:space:]]*[^,)]*/)) {
+        repo = substr($0, RSTART, RLENGTH)
+        sub(/^\(repo:[[:space:]]*/, "", repo)
+        sub(/[[:space:]]+$/, "", repo)
+        print repo
+        found = 1
+        exit
+      }
+      exit
+    }
+    END { exit found ? 0 : 1 }
+  ' "$file"
+}
+
+registry_has_project() {
+  local id=$1 project=$2 projects entry
+  projects=$(secondmate_registry_field "$REG" "$id" projects 2>/dev/null || true)
+  while IFS= read -r entry; do
+    entry=${entry#"${entry%%[![:space:]]*}"}
+    entry=${entry%"${entry##*[![:space:]]}"}
+    [ "$entry" = "$project" ] && return 0
+  done < <(printf '%s\n' "$projects" | tr ',' '\n')
+  return 1
+}
+
+canonical_git_common_dir() {
+  local repo=$1 common
+  common=$(git -C "$repo" rev-parse --git-common-dir 2>/dev/null) || return 1
+  case "$common" in
+    /*) cd "$common" && pwd -P ;;
+    *) cd "$repo/$common" && pwd -P ;;
+  esac
+}
+
+validate_local_only_item_route() { # <secondmate-id> <backlog> <key> <remote:0|1> [local-home]
+  local id=$1 backlog=$2 key=$3 remote=$4 home=${5:-} project mode projects source child
+  local expected_source expected_git_dir actual_source actual_git_dir parent_home source_top child_top child_git_dir
+  project=$(backlog_key_repo "$backlog" "$key" 2>/dev/null || true)
+  [ -n "$project" ] || return 0
+  read -r mode _ <<EOF
+$(FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" "$FM_ROOT/bin/fm-project-mode.sh" "$project" 2>/dev/null)
+EOF
+  [ "$mode" = local-only ] || return 0
+  if [ "$remote" = 1 ]; then
+    echo "error: refusing to hand off local-only item $key for project $project to remote secondmate $id" >&2
+    return 1
+  fi
+  registry_has_project "$id" "$project" || {
+    projects=$(secondmate_registry_field "$REG" "$id" projects 2>/dev/null || true)
+    echo "error: local-only item $key belongs to project $project, which is not registered for secondmate $id (projects: ${projects:-none})" >&2
+    return 1
+  }
+  fm_secondmate_parent_record_parse "$home/.fm-secondmate-parent" \
+    && [ "$FM_SECONDMATE_PARENT_ROUTE" = local ] || {
+      echo "error: local-only handoff requires a valid local parent binding for secondmate $id" >&2
+      return 1
+    }
+  parent_home=$(resolved_existing_dir "$FM_SECONDMATE_PARENT_HOME") || return 1
+  [ "$parent_home" = "$(resolved_existing_dir "$FM_HOME")" ] || {
+    echo "error: secondmate $id is bound to parent $parent_home, not active parent $(resolved_existing_dir "$FM_HOME")" >&2
+    return 1
+  }
+  source="$FM_HOME/projects/$project"
+  child="$home/projects/$project"
+  [ -d "$source" ] && [ ! -L "$source" ] && [ -d "$child" ] && [ ! -L "$child" ] || {
+    echo "error: local-only project $project is unavailable or unsafe in the parent or secondmate home" >&2
+    return 1
+  }
+  expected_source=$(cd "$source" && pwd -P)
+  expected_git_dir=$(canonical_git_common_dir "$source") || return 1
+  source_top=$(git -C "$source" rev-parse --show-toplevel 2>/dev/null) || return 1
+  [ "$(cd "$source_top" && pwd -P)" = "$expected_source" ] || {
+    echo "error: local-only parent project $project is nested inside another git worktree" >&2
+    return 1
+  }
+  child_top=$(git -C "$child" rev-parse --show-toplevel 2>/dev/null) || return 1
+  [ "$(cd "$child_top" && pwd -P)" = "$(cd "$child" && pwd -P)" ] || {
+    echo "error: local-only project $project in secondmate $id is nested inside another git worktree" >&2
+    return 1
+  }
+  child_git_dir=$(canonical_git_common_dir "$child") || return 1
+  [ "$child_git_dir" != "$expected_git_dir" ] || {
+    echo "error: local-only project $project in secondmate $id shares the parent project's git directory" >&2
+    return 1
+  }
+  actual_source=$(git -C "$child" config --local --get fm.localSource 2>/dev/null || true)
+  actual_git_dir=$(git -C "$child" config --local --get fm.localSourceGitDir 2>/dev/null || true)
+  [ "$actual_source" = "$expected_source" ] && [ "$actual_git_dir" = "$expected_git_dir" ] || {
+    echo "error: local-only project $project in secondmate $id is not bound to the active parent project" >&2
+    return 1
+  }
+  [ -z "$(git -C "$child" remote 2>/dev/null || true)" ] || {
+    echo "error: local-only project $project in secondmate $id has a remote; refusing a publishing-capable handoff" >&2
+    return 1
+  }
 }
 
 backlog_key_noncanonical_body_lines() {
@@ -763,6 +875,13 @@ remote_handoff() { # <secondmate-id> <keys...>
   outbox="$DATA/handoff/$id.outbox.md"
   validate_backlog_file "main backlog" "$MAIN_BACKLOG" || return 1
   validate_backlog_file "remote handoff outbox" "$outbox" || return 1
+  for key in "${requested[@]}"; do
+    if backlog_key_section "$outbox" "$key" >/dev/null 2>&1; then
+      validate_local_only_item_route "$id" "$outbox" "$key" 1 || return 1
+    else
+      validate_local_only_item_route "$id" "$MAIN_BACKLOG" "$key" 1 || return 1
+    fi
+  done
   if [ ! -e "$outbox" ] && [ ! -L "$outbox" ]; then
     receiver_wake_clear_confirmed "$id" || {
       echo "error: stale receiver wake state for secondmate $id could not be cleared" >&2
@@ -994,6 +1113,16 @@ if [ "$FAILED" -ne 0 ]; then
   echo "       nothing was moved." >&2
   exit 1
 fi
+
+for key in "${TO_MOVE[@]}"; do
+  validate_local_only_item_route "$ID" "$MAIN_BACKLOG" "$key" 0 "$SUB_HOME" || {
+    echo "       nothing was moved." >&2
+    exit 1
+  }
+done
+for key in "${ALREADY[@]}"; do
+  validate_local_only_item_route "$ID" "$SUB_BACKLOG" "$key" 0 "$SUB_HOME" || exit 1
+done
 
 REQUESTED_BATCH=$(receiver_wake_batch_id "$@") || {
   echo "error: receiver wake batch identity could not be recorded; nothing was moved" >&2

@@ -1886,7 +1886,7 @@ test_secondmate_home_teardown_delivers_final_line_or_refuses() {
   configure_secondmate_home "$case_dir" local "$case_dir/parent"
   mkdir -p "$case_dir/parent/state"
   channel="$case_dir/parent/state/mate-x.status"
-  write_meta "$case_dir" local-only ship
+  write_meta "$case_dir" no-mistakes ship
   wt_commit "$case_dir" "merged work"
   wt_head=$(git -C "$case_dir/wt" rev-parse HEAD)
   git -C "$case_dir/project" update-ref refs/heads/main "$wt_head"
@@ -1897,7 +1897,7 @@ test_secondmate_home_teardown_delivers_final_line_or_refuses() {
   rc=$?
   set -e
   expect_code 0 "$rc" "mate-teardown-delivers: teardown should succeed: $(cat "$case_dir/stderr")"
-  grep -Eq '^done \[key=child-outcome-task-x1-done-[0-9a-f]{8}\]: child task-x1 done: PR https://github.com/example/repo/pull/9 checks green pr=https://github.com/example/repo/pull/9 mode=local-only$' "$channel" \
+  grep -Eq '^done \[key=child-outcome-task-x1-done-[0-9a-f]{8}\]: child task-x1 done: PR https://github.com/example/repo/pull/9 checks green pr=https://github.com/example/repo/pull/9 mode=no-mistakes$' "$channel" \
     || fail "mate-teardown-delivers: the final ledger line did not reach the parent: $(cat "$channel" 2>/dev/null)"
   [ ! -e "$case_dir/state/task-x1.meta" ] || fail "mate-teardown-delivers: teardown left the task record"
 
@@ -1906,7 +1906,7 @@ test_secondmate_home_teardown_delivers_final_line_or_refuses() {
   # The channel path is occupied by a directory, so no line can be appended.
   mkdir -p "$case_dir/parent/state/mate-x.status"
   channel="$case_dir/parent/state/mate-x.status"
-  write_meta "$case_dir" local-only ship
+  write_meta "$case_dir" no-mistakes ship
   mkdir -p "$case_dir/tasktmp"
   printf '!\n' > "$case_dir/state/task-x1.grok-turnend-token"
   printf '!\n' > "$case_dir/state/task-x1.kimi-turnend-token"

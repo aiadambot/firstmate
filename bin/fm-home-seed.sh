@@ -16,7 +16,9 @@
 #       refuses a home with project clones or project-registry entries, so it
 #       never converts populated homes in place. The charter brief
 #       is copied to data/charter.md, newly cloned no-mistakes projects are
-#       initialized, an ignored .fm-secondmate-parent binding is published before
+#       initialized, local-only projects are copied without remotes and bound to
+#       their canonical parent checkout with fm.localSource and
+#       fm.localSourceGitDir, an ignored .fm-secondmate-parent binding is published before
 #       the .fm-secondmate-home identity marker, and data/secondmates.md is updated.
 #       Seeding is transactional: on validation, clone, init, or registry failure,
 #       generated briefs, new homes, new project clones, and registry edits are
@@ -380,6 +382,123 @@ source_origin_url() {
   normalize_origin_url "$src" "$url"
 }
 
+local_project_identity() {
+  local repo=$1 common
+  common=$(git -C "$repo" rev-parse --git-common-dir 2>/dev/null) || return 1
+  printf '%s\n' "$(resolved_path "$repo")"
+  case "$common" in
+    /*) resolved_path "$common" ;;
+    *) resolved_path "$repo/$common" ;;
+  esac
+}
+
+local_project_default_branch() {
+  local repo=$1 ref branch
+  ref=$(git -C "$repo" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
+  if [ -n "$ref" ]; then
+    printf '%s\n' "${ref#origin/}"
+    return
+  fi
+  for branch in main master; do
+    if git -C "$repo" show-ref --verify --quiet "refs/heads/$branch"; then
+      printf '%s\n' "$branch"
+      return
+    fi
+  done
+  return 1
+}
+
+validate_local_project_source() {
+  local project=$1 src=$2 identity source_path source_git_dir projects_path status top branch default_branch
+  case "$project" in ''|*[!A-Za-z0-9._-]*) echo "error: unsafe local-only project name: $project" >&2; return 1 ;; esac
+  [ -d "$PROJECTS" ] && [ ! -L "$PROJECTS" ] || {
+    echo "error: local-only parent projects directory is unavailable or unsafe: $PROJECTS" >&2
+    return 1
+  }
+  [ ! -L "$src" ] || { echo "error: local-only project $project source must not be a symlink: $src" >&2; return 1; }
+  projects_path=$(resolved_path "$PROJECTS")
+  [ "$(resolved_path "$src")" = "$projects_path/$project" ] || {
+    echo "error: local-only project $project source must be a direct child of the canonical parent projects directory" >&2
+    return 1
+  }
+  top=$(git -C "$src" rev-parse --show-toplevel 2>/dev/null) || {
+    echo "error: local-only project $project source is not a git worktree" >&2
+    return 1
+  }
+  [ "$(resolved_path "$top")" = "$(resolved_path "$src")" ] || {
+    echo "error: local-only project $project source is nested inside another git worktree" >&2
+    return 1
+  }
+  branch=$(git -C "$src" symbolic-ref --quiet --short HEAD 2>/dev/null) || {
+    echo "error: local-only project $project must be checked out on its canonical default branch before seeding" >&2
+    return 1
+  }
+  default_branch=$(local_project_default_branch "$src") || {
+    echo "error: could not resolve the canonical default branch for local-only project $project" >&2
+    return 1
+  }
+  [ "$branch" = "$default_branch" ] || {
+    echo "error: local-only project $project is on branch $branch, expected canonical default $default_branch" >&2
+    return 1
+  }
+  status=$(git -C "$src" status --porcelain --untracked-files=all 2>/dev/null) || {
+    echo "error: could not inspect local-only project $project worktree status" >&2
+    return 1
+  }
+  [ -z "$status" ] || {
+    echo "error: local-only project $project has uncommitted work; refusing to seed an ambiguous parent snapshot" >&2
+    return 1
+  }
+  identity=$(local_project_identity "$src") || {
+    echo "error: could not resolve local-only project identity for $project at $src" >&2
+    return 1
+  }
+  source_path=${identity%%$'\n'*}
+  source_git_dir=${identity#*$'\n'}
+  [ -n "$source_path" ] && [ -n "$source_git_dir" ]
+}
+
+validate_seeded_local_project() {
+  local project=$1 src=$2 dst=$3 identity expected_source expected_git_dir actual_source actual_git_dir remotes
+  local dst_parent dst_path top child_git_dir
+  identity=$(local_project_identity "$src") || return 1
+  expected_source=${identity%%$'\n'*}
+  expected_git_dir=${identity#*$'\n'}
+  dst_parent=${dst%/*}
+  [ ! -L "$dst_parent" ] && [ ! -L "$dst" ] || {
+    echo "error: seeded local-only project $project path must not use symlinks: $dst" >&2
+    return 1
+  }
+  dst_parent=$(resolved_path "$dst_parent")
+  dst_path=$(resolved_path "$dst")
+  [ "$dst_path" = "$dst_parent/$project" ] || {
+    echo "error: seeded local-only project $project must be a direct child of the canonical secondmate projects directory" >&2
+    return 1
+  }
+  top=$(git -C "$dst" rev-parse --show-toplevel 2>/dev/null) || return 1
+  [ "$(resolved_path "$top")" = "$dst_path" ] || {
+    echo "error: seeded local-only project $project at $dst is nested inside another git worktree" >&2
+    return 1
+  }
+  child_git_dir=$(local_project_identity "$dst") || return 1
+  child_git_dir=${child_git_dir#*$'\n'}
+  [ "$child_git_dir" != "$expected_git_dir" ] || {
+    echo "error: seeded local-only project $project at $dst shares the parent project's git directory" >&2
+    return 1
+  }
+  actual_source=$(git -C "$dst" config --local --get fm.localSource 2>/dev/null || true)
+  actual_git_dir=$(git -C "$dst" config --local --get fm.localSourceGitDir 2>/dev/null || true)
+  [ "$actual_source" = "$expected_source" ] && [ "$actual_git_dir" = "$expected_git_dir" ] || {
+    echo "error: seeded local-only project $project at $dst is not bound to parent project $expected_source ($expected_git_dir)" >&2
+    return 1
+  }
+  remotes=$(git -C "$dst" remote 2>/dev/null || true)
+  [ -z "$remotes" ] || {
+    echo "error: seeded local-only project $project at $dst has remotes; local-only secondmate clones must remain nonpublishing" >&2
+    return 1
+  }
+}
+
 seeded_origin_url() {
   local project=$1 dst=$2 expected=$3 url
   url=$(git -C "$dst" remote get-url origin 2>/dev/null || true)
@@ -466,8 +585,24 @@ clone_project() {
 $(FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" "$FM_ROOT/bin/fm-project-mode.sh" "$project")
 EOF
   if [ "$mode" = local-only ]; then
-    echo "error: project $project is local-only; secondmate routes support only no-mistakes and direct-PR projects" >&2
-    return 1
+    validate_local_project_source "$project" "$src" || return 1
+    if [ -e "$dst" ]; then
+      [ -d "$dst" ] || { echo "error: seeded project $project exists at $dst but is not a directory" >&2; return 1; }
+      git -C "$dst" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "error: seeded project $project at $dst is not a git repo" >&2; return 1; }
+      validate_seeded_local_project "$project" "$src" "$dst"
+      return
+    fi
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_COUNT=0 GIT_ALLOW_PROTOCOL=file \
+      git clone --quiet --local --no-hardlinks -- "$src" "$dst" || return 1
+    git -C "$dst" remote remove origin || return 1
+    {
+      IFS= read -r url
+      IFS= read -r dst_url
+    } < <(local_project_identity "$src")
+    git -C "$dst" config --local fm.localSource "$url"
+    git -C "$dst" config --local fm.localSourceGitDir "$dst_url"
+    validate_seeded_local_project "$project" "$src" "$dst"
+    return
   fi
   if [ -e "$dst" ]; then
     [ -d "$dst" ] || { echo "error: seeded project $project exists at $dst but is not a directory" >&2; return 1; }
@@ -493,8 +628,8 @@ validate_seed_project() {
 $(FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" "$FM_ROOT/bin/fm-project-mode.sh" "$project")
 EOF
   if [ "$mode" = local-only ]; then
-    echo "error: project $project is local-only; secondmate routes support only no-mistakes and direct-PR projects" >&2
-    return 1
+    validate_local_project_source "$project" "$src"
+    return
   fi
   url=$(git -C "$src" remote get-url origin 2>/dev/null || true)
   [ -n "$url" ] || { echo "error: project $project is $mode but has no origin remote" >&2; return 1; }

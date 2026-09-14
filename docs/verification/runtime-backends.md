@@ -1321,6 +1321,12 @@ FM_SEND_MARKER_HERDR_E2E=1 \
   tests/fm-send-secondmate-marker-herdr-e2e.test.sh
 ```
 
+On 2026-09-14 this guard passed with Pi 0.85.0 and Herdr 0.8.2-preview.2026-08-31-b1ff4582e968 (protocol 21) in a named session managed by `fm-herdr-lab.sh`.
+The real Pi process captured the byte-exact inbox doorbell, and the durable message contained exactly one routed marker plus the correlation bound to the delivered parent pending request.
+Direct terminal input remained byte-exact and unmarked.
+The capture extension aborted before a provider request, so this proves transport and durable request binding, not model consumption of the instruction.
+Helper teardown passed its unchanged-default-fleet tripwire.
+
 ### Native blocked event
 
 The protocol-16 event path was measured on 2026-07-11 with Herdr 0.7.3 and Python 3.13:

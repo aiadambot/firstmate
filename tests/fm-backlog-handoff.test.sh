@@ -39,6 +39,95 @@ worktree=$sub_abs
 EOF
 }
 
+test_local_only_handoff_requires_bound_local_project() {
+  local home="$TMP_ROOT/local-only-main" sub="$TMP_ROOT/local-only-sub" sub_abs out source source_git
+  mkdir -p "$home/data" "$home/state" "$home/projects"
+  fm_git_init_commit "$home/projects/alpha"
+  printf '%s\n' '- alpha [local-only] - local project (added 2026-09-14)' > "$home/data/projects.md"
+  FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" FM_SECONDMATE_CHARTER='coordinate local alpha work' \
+    "$ROOT/bin/fm-home-seed.sh" design "$sub" alpha >/dev/null \
+    || fail "local-only secondmate seed failed"
+  sub_abs=$(cd "$sub" && pwd -P)
+  cat > "$home/state/design.meta" <<EOF
+window=firstmate:fm-design
+kind=secondmate
+harness=claude
+backend=tmux
+home=$sub_abs
+worktree=$sub_abs
+EOF
+  cat > "$home/data/backlog.md" <<'EOF'
+## Queued
+- [ ] local-item - coordinate a local change (repo: alpha)
+
+## Done
+EOF
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" "$ROOT/bin/fm-backlog-handoff.sh" design local-item 2>&1) \
+    || fail "bound local-only handoff failed: $out"
+  assert_grep 'local-item' "$sub/data/backlog.md" "local-only item did not reach the secondmate backlog"
+  assert_no_grep 'local-item' "$home/data/backlog.md" "local-only item remained in the parent backlog"
+  FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" "$ROOT/bin/fm-backlog-handoff.sh" design local-item >/dev/null 2>&1 \
+    || fail "bound local-only handoff was not idempotent"
+  [ "$(grep -cF -- 'local-item' "$sub/data/backlog.md")" -eq 1 ] \
+    || fail "local-only handoff rerun duplicated the item"
+
+  git -C "$sub/projects/alpha" config --local fm.localSource "$TMP_ROOT/foreign"
+  cat > "$home/data/backlog.md" <<'EOF'
+## Queued
+- [ ] foreign-item - must refuse a foreign binding (repo: alpha)
+
+## Done
+EOF
+  if FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" "$ROOT/bin/fm-backlog-handoff.sh" design foreign-item >"$TMP_ROOT/local-only-foreign.out" 2>&1; then
+    fail "local-only handoff accepted a foreign child binding"
+  fi
+  assert_grep 'not bound to the active parent project' "$TMP_ROOT/local-only-foreign.out" \
+    "foreign child binding refusal was not explained"
+  assert_grep 'foreign-item' "$home/data/backlog.md" "foreign binding refusal moved the parent item"
+
+  rm -rf -- "$sub/projects/alpha"
+  git -C "$home/projects/alpha" worktree add -qb linked-replacement "$sub/projects/alpha"
+  source=$(cd "$home/projects/alpha" && pwd -P)
+  source_git=$(cd "$home/projects/alpha/$(git -C "$home/projects/alpha" rev-parse --git-common-dir)" && pwd -P)
+  git -C "$sub/projects/alpha" config --local fm.localSource "$source"
+  git -C "$sub/projects/alpha" config --local fm.localSourceGitDir "$source_git"
+  cat > "$home/data/backlog.md" <<'EOF'
+## Queued
+- [ ] linked-item - must refuse shared parent refs (repo: alpha)
+
+## Done
+EOF
+  if FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" "$ROOT/bin/fm-backlog-handoff.sh" design linked-item >"$TMP_ROOT/local-only-linked.out" 2>&1; then
+    fail "local-only handoff accepted a child worktree sharing parent refs"
+  fi
+  assert_grep "shares the parent project's git directory" "$TMP_ROOT/local-only-linked.out" \
+    "shared parent git-directory refusal was not explained"
+  assert_grep 'linked-item' "$home/data/backlog.md" "shared git-directory refusal moved the parent item"
+  pass "local-only handoff accepts only the bound nonpublishing local clone"
+}
+
+test_remote_local_only_handoff_is_refused_before_staging() {
+  local home="$TMP_ROOT/remote-local-only-main" remote_home=/srv/firstmate-local-only
+  mkdir -p "$home/data" "$home/state"
+  printf '%s\n' '- alpha [local-only] - local project (added 2026-09-14)' > "$home/data/projects.md"
+  printf -- '- remote - remote route (host: lab; root: /srv/firstmate-code; home: %s; scope: local work; projects: alpha; added 2026-09-14)\n' \
+    "$remote_home" > "$home/data/secondmates.md"
+  cat > "$home/data/backlog.md" <<'EOF'
+## Queued
+- [ ] remote-local - must stay local (repo: alpha)
+
+## Done
+EOF
+  if FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" "$ROOT/bin/fm-backlog-handoff.sh" remote remote-local >"$TMP_ROOT/remote-local-only.out" 2>&1; then
+    fail "remote handoff accepted a local-only item"
+  fi
+  assert_grep 'refusing to hand off local-only item remote-local' "$TMP_ROOT/remote-local-only.out" \
+    "remote local-only refusal was not explained"
+  assert_grep 'remote-local' "$home/data/backlog.md" "remote local-only refusal changed the parent backlog"
+  assert_absent "$home/data/handoff/remote.outbox.md" "remote local-only refusal staged an outbox"
+  pass "remote routes refuse local-only items before staging"
+}
+
 inbox_body_stream() { # <state-dir> <task-id>
   local rec
   for rec in "$1/$2.inbox"/*.msg; do
@@ -1345,6 +1434,8 @@ EOF
 }
 
 test_handoff_wakes_live_local_receiver
+test_local_only_handoff_requires_bound_local_project
+test_remote_local_only_handoff_is_refused_before_staging
 test_failed_wake_retries_when_the_item_is_already_present
 test_known_receiver_failure_remains_retryable_after_grace
 test_known_failure_restores_retry_after_reconciliation_race

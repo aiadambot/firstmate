@@ -864,22 +864,177 @@ test_home_seed_refuses_missing_projects_without_signal() {
   pass "home seeding fails loudly on accidental project omission and rejects mixed --no-projects"
 }
 
-test_home_seed_refuses_local_only_project() {
-  local home subhome err
+test_home_seed_supports_bound_nonpublishing_local_only_project() {
+  local home subhome source source_git fakebin git_config helper_log
   home="$TMP_ROOT/local-only-seed-home"
   subhome="$TMP_ROOT/local-only-seed-subhome"
-  err="$TMP_ROOT/local-only-seed.err"
   mkdir -p "$home/projects" "$home/data" "$home/state"
   fm_git_init_commit "$home/projects/alpha"
   printf '%s\n' '- alpha [local-only] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  source=$(cd "$home/projects/alpha" && pwd -P)
+  fakebin=$(fm_fakebin "$TMP_ROOT/local-only-seed-fake")
+  git_config="$TMP_ROOT/local-only-seed.gitconfig"
+  helper_log="$TMP_ROOT/local-only-seed-helper.log"
+  cat > "$fakebin/git-remote-evil" <<'SH'
+#!/usr/bin/env bash
+printf 'called\n' > "$FM_FAKE_REMOTE_HELPER_LOG"
+exit 91
+SH
+  chmod +x "$fakebin/git-remote-evil"
+  printf '[url "evil::"]\n\tinsteadOf = %s\n' "$source" > "$git_config"
 
-  if FM_HOME="$home" "$ROOT/bin/fm-home-seed.sh" design "$subhome" alpha >/dev/null 2>"$err"; then
-    fail "seed allowed a local-only project into a secondmate home"
+  FM_HOME="$home" FM_SECONDMATE_CHARTER='local coordination' PATH="$fakebin:$PATH" \
+    GIT_CONFIG_GLOBAL="$git_config" FM_FAKE_REMOTE_HELPER_LOG="$helper_log" \
+    "$ROOT/bin/fm-home-seed.sh" design "$subhome" alpha >/dev/null \
+    || fail "seed refused a local-only project"
+  assert_absent "$helper_log" "local-only clone invoked a URL-rewritten remote helper"
+  source_git=$(cd "$home/projects/alpha/$(git -C "$home/projects/alpha" rev-parse --git-common-dir)" && pwd -P)
+  [ "$(git -C "$subhome/projects/alpha" config --local --get fm.localSource)" = "$source" ] \
+    || fail "local-only clone lost its canonical parent source binding"
+  [ "$(git -C "$subhome/projects/alpha" config --local --get fm.localSourceGitDir)" = "$source_git" ] \
+    || fail "local-only clone lost its canonical parent git-dir binding"
+  [ -z "$(git -C "$subhome/projects/alpha" remote)" ] \
+    || fail "local-only clone retained a publishing remote"
+  [ ! -e "$subhome/projects/alpha/.no-mistakes-init" ] \
+    || fail "local-only clone was initialized for no-mistakes"
+  pass "home seeding binds local-only clones to their parent without remotes"
+}
+
+test_home_seed_refuses_dirty_or_foreign_local_only_project() {
+  local home dirty_sub foreign_sub err source_git
+  home="$TMP_ROOT/local-only-refusal-home"
+  dirty_sub="$TMP_ROOT/local-only-dirty-subhome"
+  foreign_sub="$TMP_ROOT/local-only-foreign-subhome"
+  err="$TMP_ROOT/local-only-refusal.err"
+  mkdir -p "$home/projects" "$home/data" "$home/state"
+  fm_git_init_commit "$home/projects/alpha"
+  printf '%s\n' '- alpha [local-only] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  printf 'dirty\n' > "$home/projects/alpha/uncommitted"
+  if FM_HOME="$home" FM_SECONDMATE_CHARTER='local coordination' \
+    "$ROOT/bin/fm-home-seed.sh" design "$dirty_sub" alpha >/dev/null 2>"$err"; then
+    fail "seed accepted a dirty local-only parent project"
   fi
-  grep -F 'project alpha is local-only; secondmate routes support only no-mistakes and direct-PR projects' "$err" >/dev/null \
-    || fail "seed did not explain local-only project rejection"
-  [ ! -e "$subhome" ] || fail "seed created a subhome before rejecting a local-only project"
-  pass "home seeding refuses local-only projects"
+  assert_grep 'has uncommitted work' "$err" "dirty local-only refusal was not explained"
+  assert_absent "$dirty_sub" "dirty local-only refusal created a secondmate home"
+  rm -f "$home/projects/alpha/uncommitted"
+
+  mark_firstmate_home "$foreign_sub"
+  mkdir -p "$foreign_sub/data" "$foreign_sub/state" "$foreign_sub/config" "$foreign_sub/projects"
+  fm_git_init_commit "$foreign_sub/projects/alpha"
+  source_git=$(cd "$home/projects/alpha/$(git -C "$home/projects/alpha" rev-parse --git-common-dir)" && pwd -P)
+  git -C "$foreign_sub/projects/alpha" config --local fm.localSource "$TMP_ROOT/foreign"
+  git -C "$foreign_sub/projects/alpha" config --local fm.localSourceGitDir "$source_git"
+  if FM_HOME="$home" FM_SECONDMATE_CHARTER='local coordination' \
+    "$ROOT/bin/fm-home-seed.sh" design "$foreign_sub" alpha >/dev/null 2>"$err"; then
+    fail "seed accepted a preexisting local-only clone bound to another parent"
+  fi
+  assert_grep 'is not bound to parent project' "$err" "foreign local-only binding refusal was not explained"
+  [ -z "$(git -C "$foreign_sub/projects/alpha" remote)" ] \
+    || fail "foreign local-only refusal changed remotes"
+  pass "home seeding refuses dirty parent state and foreign local-only bindings"
+}
+
+test_home_seed_refuses_unsafe_local_only_parent_layout() {
+  local home outside sub err nested_home nested_sub branch_home branch_sub
+  home="$TMP_ROOT/local-only-symlink-home"
+  outside="$TMP_ROOT/local-only-symlink-projects"
+  sub="$TMP_ROOT/local-only-symlink-subhome"
+  err="$TMP_ROOT/local-only-layout.err"
+  mkdir -p "$home/data" "$home/state" "$outside"
+  fm_git_init_commit "$outside/alpha"
+  ln -s "$outside" "$home/projects"
+  printf '%s\n' '- alpha [local-only] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  if FM_HOME="$home" FM_SECONDMATE_CHARTER='local coordination' \
+    "$ROOT/bin/fm-home-seed.sh" design "$sub" alpha >/dev/null 2>"$err"; then
+    fail "seed accepted a symlinked local-only parent projects directory"
+  fi
+  assert_grep 'parent projects directory is unavailable or unsafe' "$err" \
+    "symlinked local-only parent projects refusal was not explained"
+  assert_absent "$sub" "symlinked local-only parent projects refusal created a home"
+
+  nested_home="$TMP_ROOT/local-only-nested-home"
+  nested_sub="$TMP_ROOT/local-only-nested-subhome"
+  mkdir -p "$nested_home/data" "$nested_home/state" "$nested_home/projects/alpha"
+  fm_git_init_commit "$nested_home/projects"
+  printf '%s\n' '- alpha [local-only] - alpha project (added 2026-06-22)' > "$nested_home/data/projects.md"
+  if FM_HOME="$nested_home" FM_SECONDMATE_CHARTER='local coordination' \
+    "$ROOT/bin/fm-home-seed.sh" design "$nested_sub" alpha >/dev/null 2>"$err"; then
+    fail "seed accepted a local-only source nested in another git worktree"
+  fi
+  assert_grep 'source is nested inside another git worktree' "$err" \
+    "nested local-only source refusal was not explained"
+  assert_absent "$nested_sub" "nested local-only source refusal created a home"
+
+  branch_home="$TMP_ROOT/local-only-feature-home"
+  branch_sub="$TMP_ROOT/local-only-feature-subhome"
+  mkdir -p "$branch_home/data" "$branch_home/state" "$branch_home/projects"
+  fm_git_init_commit "$branch_home/projects/alpha"
+  git -C "$branch_home/projects/alpha" checkout -qb feature
+  printf '%s\n' '- alpha [local-only] - alpha project (added 2026-06-22)' > "$branch_home/data/projects.md"
+  if FM_HOME="$branch_home" FM_SECONDMATE_CHARTER='local coordination' \
+    "$ROOT/bin/fm-home-seed.sh" design "$branch_sub" alpha >/dev/null 2>"$err"; then
+    fail "seed accepted an unlanded feature branch as the local-only baseline"
+  fi
+  assert_grep 'expected canonical default' "$err" \
+    "local-only feature branch refusal was not explained"
+  assert_absent "$branch_sub" "local-only feature branch refusal created a home"
+  pass "home seeding refuses unsafe project roots, nested repositories, and feature-branch baselines"
+}
+
+test_home_seed_refuses_shared_or_nested_existing_local_only_destination() {
+  local home linked_sub nested_home nested_sub err source source_git source_head source_status
+  home="$TMP_ROOT/local-only-shared-destination-home"
+  linked_sub="$TMP_ROOT/local-only-shared-destination-subhome"
+  err="$TMP_ROOT/local-only-destination.err"
+  mkdir -p "$home/data" "$home/state" "$home/projects"
+  fm_git_init_commit "$home/projects/alpha"
+  printf '%s\n' '- alpha [local-only] - alpha project (added 2026-06-22)' > "$home/data/projects.md"
+  mark_firstmate_home "$linked_sub"
+  mkdir -p "$linked_sub/data" "$linked_sub/state" "$linked_sub/config" "$linked_sub/projects"
+  git -C "$home/projects/alpha" worktree add -qb linked-child "$linked_sub/projects/alpha"
+  source=$(cd "$home/projects/alpha" && pwd -P)
+  source_git=$(cd "$home/projects/alpha/$(git -C "$home/projects/alpha" rev-parse --git-common-dir)" && pwd -P)
+  source_head=$(git -C "$home/projects/alpha" rev-parse HEAD)
+  source_status=$(git -C "$home/projects/alpha" status --porcelain --untracked-files=all)
+  git -C "$linked_sub/projects/alpha" config --local fm.localSource "$source"
+  git -C "$linked_sub/projects/alpha" config --local fm.localSourceGitDir "$source_git"
+  if FM_HOME="$home" FM_SECONDMATE_CHARTER='local coordination' \
+    "$ROOT/bin/fm-home-seed.sh" design "$linked_sub" alpha >/dev/null 2>"$err"; then
+    fail "seed accepted a child project linked to the parent's git directory"
+  fi
+  assert_grep "shares the parent project's git directory" "$err" \
+    "shared git-directory refusal was not explained"
+  [ "$(git -C "$home/projects/alpha" rev-parse HEAD)" = "$source_head" ] \
+    || fail "shared git-directory refusal moved the parent source head"
+  [ "$(git -C "$home/projects/alpha" status --porcelain --untracked-files=all)" = "$source_status" ] \
+    || fail "shared git-directory refusal changed the parent source worktree"
+
+  nested_home="$TMP_ROOT/local-only-nested-destination-home"
+  nested_sub="$TMP_ROOT/local-only-nested-destination-subhome"
+  mkdir -p "$nested_home/data" "$nested_home/state" "$nested_home/projects"
+  fm_git_init_commit "$nested_home/projects/alpha"
+  printf '%s\n' '- alpha [local-only] - alpha project (added 2026-06-22)' > "$nested_home/data/projects.md"
+  mark_firstmate_home "$nested_sub"
+  mkdir -p "$nested_sub/data" "$nested_sub/state" "$nested_sub/config"
+  fm_git_init_commit "$nested_sub/projects"
+  mkdir -p "$nested_sub/projects/alpha"
+  source=$(cd "$nested_home/projects/alpha" && pwd -P)
+  source_git=$(cd "$nested_home/projects/alpha/$(git -C "$nested_home/projects/alpha" rev-parse --git-common-dir)" && pwd -P)
+  source_head=$(git -C "$nested_home/projects/alpha" rev-parse HEAD)
+  source_status=$(git -C "$nested_home/projects/alpha" status --porcelain --untracked-files=all)
+  git -C "$nested_sub/projects/alpha" config --local fm.localSource "$source"
+  git -C "$nested_sub/projects/alpha" config --local fm.localSourceGitDir "$source_git"
+  if FM_HOME="$nested_home" FM_SECONDMATE_CHARTER='local coordination' \
+    "$ROOT/bin/fm-home-seed.sh" design "$nested_sub" alpha >/dev/null 2>"$err"; then
+    fail "seed accepted a destination nested inside another git worktree"
+  fi
+  assert_grep 'is nested inside another git worktree' "$err" \
+    "nested destination refusal was not explained"
+  [ "$(git -C "$nested_home/projects/alpha" rev-parse HEAD)" = "$source_head" ] \
+    || fail "nested destination refusal moved the parent source head"
+  [ "$(git -C "$nested_home/projects/alpha" status --porcelain --untracked-files=all)" = "$source_status" ] \
+    || fail "nested destination refusal changed the parent source worktree"
+  pass "home seeding refuses parent-linked and nested existing local-only destinations"
 }
 
 test_home_seed_refuses_registry_delimiter_home() {
@@ -2981,7 +3136,10 @@ test_home_seed_refuses_projectless_home_with_symlinked_projects
 test_home_seed_refuses_projectless_home_with_non_directory_projects
 test_home_seed_refuses_projectless_home_with_uninspectable_registry
 test_home_seed_refuses_missing_projects_without_signal
-test_home_seed_refuses_local_only_project
+test_home_seed_supports_bound_nonpublishing_local_only_project
+test_home_seed_refuses_dirty_or_foreign_local_only_project
+test_home_seed_refuses_unsafe_local_only_parent_layout
+test_home_seed_refuses_shared_or_nested_existing_local_only_destination
 test_home_seed_refuses_registry_delimiter_home
 test_home_seed_refuses_active_home_and_root
 test_home_seed_refuses_home_marked_for_another_id

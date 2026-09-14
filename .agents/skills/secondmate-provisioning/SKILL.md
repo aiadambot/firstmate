@@ -13,7 +13,7 @@ metadata:
 
 Use this reference before creating, seeding, validating, launching, handing backlog to, recovering, pushing inherited local material into, or retiring a persistent secondmate, and before editing `data/secondmates.md`.
 
-Keep the always-inline routing rules in `AGENTS.md` authoritative: route by natural-language `scope:`, local-only projects stay with the main firstmate, and secondmates are idle by default.
+Keep the always-inline routing rules in `AGENTS.md` authoritative: route by natural-language `scope:`, and secondmates are idle by default.
 
 ## Routing table
 
@@ -155,9 +155,26 @@ Run `bin/fm-home-seed.sh validate` when checking registry integrity; its header 
 Seeding is transactional.
 If validation, cloning, no-mistakes initialization, or registry update fails, generated briefs, new homes, new project clones, and registry edits are rolled back.
 
-Secondmate project lists may include `no-mistakes` and `direct-PR` projects only.
-`local-only` projects stay with the main firstmate.
+Local secondmate project lists may also include `local-only` projects.
+Their clone has no remote and carries the seed-owned `fm.localSource` and `fm.localSourceGitDir` bindings to the canonical project in the parent home; a later ready or landing path must validate those bindings together with the home's `.fm-secondmate-parent` record.
+Whole-home remote placement of a `local-only` project remains unsupported.
 For `no-mistakes` projects, seeding initializes only projects newly cloned into a secondmate home and refuses to mutate a preexisting clone that is not already initialized.
+
+For local-only work, [`bin/fm-local-ready.sh`](../../../bin/fm-local-ready.sh) owns child readiness and [`bin/fm-merge-local.sh`](../../../bin/fm-merge-local.sh) owns parent landing; their headers own the artifact and receipt mechanics.
+A merge in the child clone is not a parent landing, and cleanup must use the retained receipt and ancestry check owned by [`bin/fm-local-delivery-lib.sh`](../../../bin/fm-local-delivery-lib.sh).
+
+Neutral charter examples:
+
+- A domain mate routes bounded work to entries in an existing expert-definition catalog and to a separately registered research specialist; catalog entries describe available expertise and do not create persistent sessions.
+- A validation mate coordinates requested evidence across repositories through [`bin/fm-validation-coordinate.sh`](../../../bin/fm-validation-coordinate.sh) and supported routed messages; it starts no automatic audit, preserves the owner of an existing worker-run validation, establishes exclusive ownership before a new run, and adds no second pipeline or manual-review gate.
+
+Provision captain-specific catalogs, specialist registrations, and local configuration privately from the primary home only after this support lands.
+
+Validation coordination uses the exclusive claim and correlated request/result contract owned by [`bin/fm-validation-coordinate.sh`](../../../bin/fm-validation-coordinate.sh).
+Keep an existing pipeline with its current worker; a new executor needs a spawn-owned task and exclusive claim before that worker starts validation.
+The coordinator observes the supported no-mistakes AXI interface and routes requests and evidence, without changing the validator, driving a second pipeline, or adding an approval gate.
+Local-only repositories retain their nonpublishing delivery mode: the installed no-mistakes initialization requires `origin` and installs a publishing gate, so report the unsupported nonpublishing initialization as a capability blocker and identify any local checks separately.
+Never manufacture a remote, initialize a publishing gate, or label those checks as a completed no-mistakes pipeline to close that gap.
 
 ## Record intake for an existing or inherited domain
 
@@ -169,8 +186,10 @@ Both of those cases require record intake before the new mate acts on any inheri
 
 For an existing or inherited domain, the creating agent must:
 
-1. Reconcile every inherited plan against the domain's authoritative shipped state, which is `origin/main` for each relevant project plus the live deployment.
-   A fetched clone of each relevant project is a precondition of that reconciliation, so wire the home to its projects before reconciling rather than on first task.
+1. Reconcile every inherited plan against the domain's authoritative shipped state.
+   For remote-backed projects that remains `origin/main` plus the live deployment, and a fetched clone is a precondition.
+   For `local-only` projects it is a fresh read of the canonical parent project's local default branch identified by the seed binding.
+   Wire the home to its projects before reconciling rather than on first task.
    The imported backlog, the predecessor's own notes, instruction-surface prose, and an absent or unfetched local view are all inadmissible as shipped-state evidence.
 2. Seed the new home with only genuinely open work plus the domain's durable knowledge, meaning the learnings, decisions, and delivery posture that are still live.
 3. Never inherit a plan backlog blind.
@@ -207,7 +226,8 @@ It is idempotent; an item already in the secondmate backlog is skipped.
 After a successful move it warns for any moved key that still owes a public relay reply bound to `main/<key>`, because that binding no longer names the home owning the work; rebind the commitment to `secondmate:<id>` through the `fmx-respond` promised-final procedure, which owns those commands.
 That same rule governs routing generally: a Relay-linked request whose work goes to a secondmate cannot use the home-local mention link at all and needs a promised-final commitment bound to that secondmate's home.
 It refuses any destination that is not a genuine seeded firstmate home with safe operational directories and a matching `.fm-secondmate-home` marker, so a move can never land in a project.
-Do not hand off `local-only` items.
+Hand off a `local-only` item only to a local secondmate whose registered project list includes that item's repository.
+The child owns coordination and its ready branch, while the parent Firstmate remains the only landing authority through the guarded local-ready path.
 
 ## Recovery
 

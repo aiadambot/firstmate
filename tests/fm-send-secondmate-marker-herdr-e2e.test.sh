@@ -6,7 +6,8 @@
 # It exercises the end-user command shape against metadata written by a real
 # fm-spawn.sh --secondmate launch, captures Pi's before_agent_start prompt bytes,
 # and proves both sides of the routing boundary:
-#   - exact task id through explicit FM_HOME receives exactly one marker;
+#   - exact task id through explicit FM_HOME receives an inbox doorbell and
+#     stores exactly one routed marker in the durable message;
 #   - direct terminal input remains unmarked.
 #
 # Every Herdr call, including calls made inside the production backend adapter,
@@ -21,11 +22,17 @@ set -u
 . "$ROOT/bin/fm-marker-lib.sh"
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-backend.sh"
+# shellcheck source=/dev/null
+. "$ROOT/bin/fm-task-inbox-lib.sh"
+# shellcheck source=/dev/null
+. "$ROOT/bin/fm-pending-reply-lib.sh"
 
 fm_live_gate opt-in FM_SEND_MARKER_HERDR_E2E git herdr jq pi
 
 LAB_HELPER=${HERDR_LAB_HELPER:-$ROOT/bin/fm-herdr-lab.sh}
-SESSION=$("$LAB_HELPER" name fm-send-secondmate-marker-v7)
+# An operator may reserve the named lab for this invocation; the helper still
+# verifies isolation and refuses an existing/foreign session before provisioning.
+SESSION=${HERDR_LAB_SESSION:-$("$LAB_HELPER" name fm-send-secondmate-marker-v7)}
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-send-marker-herdr-e2e.XXXXXX")
 SENDER_HOME="$TMP_ROOT/sender-home"
 SECOND_HOME="$TMP_ROOT/secondmate-home"
@@ -108,6 +115,8 @@ printf '#!/usr/bin/env bash\nexec %q -e %q "$@"\n' "$REAL_PI" "$CAPTURE_EXTENSIO
 chmod +x "$FAKEBIN/pi"
 
 "$LAB_HELPER" provision "$SESSION"
+printf 'evidence: lab=%s pi=%s\n' "$SESSION" "$("$REAL_PI" --version)"
+"$LAB_HELPER" run "$SESSION" status --json
 PATH="$FAKEBIN:$ORIGINAL_PATH" FM_GATE_REFUSE_BYPASS=1 FM_HOME="$SENDER_HOME" HERDR_SESSION="$SESSION" \
   "$ROOT/bin/fm-spawn.sh" "$ID" "$SECOND_HOME" --secondmate --harness pi --backend herdr >/dev/null
 
@@ -158,12 +167,25 @@ wait_for_idle || fail "real Pi did not become idle after the startup capture"
 
 PATH="$FAKEBIN:$ORIGINAL_PATH" FM_GATE_REFUSE_BYPASS=1 FM_HOME="$SENDER_HOME" \
   "$ROOT/bin/fm-send.sh" "$ID" "$REQUEST" >/dev/null
-wait_for_prompt "$REQUEST" || fail "real Pi did not receive the exact-id fm-send request"
-GOT=$(jq -r --arg needle "$REQUEST" 'select(.prompt | contains($needle)) | .prompt' "$CAPTURE" | tail -1)
-[ "$GOT" = "${FM_FROMFIRST_MARK}${REQUEST}" ] \
-  || fail "real Pi exact-id prompt did not contain exactly one terminal-safe marker"$'\n'"--- bytes ---"$'\n'"$(printf '%s' "$GOT" | od -An -tx1)"
-printf 'evidence: exact-id received-hex=%s\n' "$(printf '%s' "$GOT" | od -An -tx1 | tr -d ' \n')"
-pass "real Pi/Herdr: exact-id FM_HOME send delivers exactly one from-firstmate marker"
+RECORDS=("$SENDER_HOME/state/$ID.inbox/"*.msg)
+[ "${#RECORDS[@]}" -eq 1 ] && [ -f "${RECORDS[0]}" ] || fail 'exact-id send did not record one durable instruction'
+DOORBELL=$(fm_task_inbox_doorbell_line "${RECORDS[0]}") || fail 'cannot derive the inbox doorbell'
+wait_for_prompt "$DOORBELL" || fail "real Pi did not receive the exact-id inbox doorbell"
+GOT=$(jq -r --arg needle "$DOORBELL" 'select(.prompt | contains($needle)) | .prompt' "$CAPTURE" | tail -1)
+[ "$GOT" = "$DOORBELL" ] || fail 'real Pi inbox doorbell was changed in transit'
+printf 'evidence: doorbell-received-hex=%s\n' "$(printf '%s' "$GOT" | od -An -tx1 | tr -d ' \n')"
+GOT=$(fm_task_inbox_body "${RECORDS[0]}") || fail 'cannot read the durable routed instruction'
+CORR=$(fm_pending_reply_extract_corr "$GOT")
+[ -n "$CORR" ] || fail 'routed request lacks its reply correlation'
+PENDING=$(fm_pending_reply_path "$SENDER_HOME/state" "$CORR")
+[ "$(fm_pending_reply_get "$PENDING" task_id)" = "$ID" ] \
+  && [ "$(fm_pending_reply_get "$PENDING" request_summary)" = "$REQUEST" ] \
+  && [ -n "$(fm_pending_reply_get "$PENDING" delivered_epoch)" ] \
+  || fail 'routed request is not bound to its delivered pending reply'
+[ "$GOT" = "${FM_FROMFIRST_MARK}corr=$CORR ${REQUEST}" ] \
+  || fail "durable exact-id request did not contain exactly one terminal-safe marker"$'\n'"--- bytes ---"$'\n'"$(printf '%s' "$GOT" | od -An -tx1)"
+printf 'evidence: durable-request-hex=%s\n' "$(printf '%s' "$GOT" | od -An -tx1 | tr -d ' \n')"
+pass "real Pi/Herdr: exact-id FM_HOME send delivers the doorbell and retains exactly one routed marker"
 wait_for_idle || fail "real Pi did not become idle after the exact-id capture"
 
 # Direct terminal input bypasses fm-send's metadata-routed transformation and
