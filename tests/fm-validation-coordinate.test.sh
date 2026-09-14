@@ -220,10 +220,24 @@ printf '%s\n' "$*" >> "$NM_LOG"
 run_id=${4:-}
 [ "${NM_WRONG_ID:-0}" != 1 ] || run_id=foreign-run
 head=${NM_HEAD:-deadbeef}
-printf 'run:\n  id: %s\n  branch: validation\n  head: %s\n  status: %s\n' "$run_id" "$head" "${NM_STATUS:-running}"
-[ -z "${NM_OUTCOME:-}" ] || printf '  outcome: %s\n' "$NM_OUTCOME"
-if [ "${NM_PIPELINE_OWNED:-0}" = 1 ]; then
-  printf 'branch_sync:\n  state: pipeline_owned\n'
+emit_run() {
+  printf 'run:\n  id: %s\n  branch: validation\n  head: %s\n  status: %s\n' "$run_id" "$head" "${NM_STATUS:-running}"
+  [ -z "${NM_OUTCOME:-}" ] || printf '  outcome: %s\n' "$NM_OUTCOME"
+}
+emit_branch_sync() {
+  if [ "${NM_PIPELINE_OWNED:-0}" = 1 ]; then
+    printf 'branch_sync:\n  state: pipeline_owned\n'
+  elif [ -n "${NM_LOCAL_HEAD:-}" ]; then
+    printf 'branch_sync:\n  state: local_owned\n  local:\n    branch: %s\n    head: "%s"\n    clean: true\n' \
+      "${NM_LOCAL_BRANCH:-validation}" "$NM_LOCAL_HEAD"
+  fi
+}
+if [ "${NM_BRANCH_SYNC_FIRST:-0}" = 1 ]; then
+  emit_branch_sync
+  emit_run
+else
+  emit_run
+  emit_branch_sync
 fi
 SH
 chmod +x "$FAKEBIN/no-mistakes"
@@ -333,6 +347,8 @@ RC=$?
 set -e
 [ "$RC" -ne 0 ] || fail "a changed worker head reported against the old validation run"
 assert_contains "$STALE" "does not continue the claimed worker identity" "stale-head refusal was not explicit"
+assert_contains "$STALE" "this copy holds that commit" \
+  "a superseded but locally present run head was reported as unresolvable"
 
 ADVANCED_HEAD=$(git -C "$WORKTREE" rev-parse HEAD)
 PATH="$FAKEBIN:$PATH" NM_LOG="$NM_LOG" NM_HEAD="$ADVANCED_HEAD" FM_HOME="$MATE_A" \
@@ -354,10 +370,28 @@ RC=$?
 set -e
 [ "$RC" -ne 0 ] || fail "a terminal run whose final head this copy cannot resolve was accepted"
 assert_contains "$UNPROVEN" "does not continue the claimed worker identity" "unresolvable terminal refusal was not explicit"
-assert_contains "$UNPROVEN" "no immutable submitted-head provenance" \
+assert_contains "$UNPROVEN" "cannot resolve it to a commit" \
+  "the terminal refusal did not name the condition it actually observed"
+assert_contains "$UNPROVEN" "no read-only AXI status field has an established immutable submitted-head contract" \
   "the terminal refusal did not name the missing upstream capability"
 ! grep -q 'no provenance' "$PARENT/state/mate-a.status" \
   || fail "a refused terminal report still published a parent channel line"
+
+# The real surface also emits the worker copy's OWN branch and clean HEAD under
+# branch_sync.local, and contracts no order between the blocks. The claim must
+# read its identity fields from the run block alone, or a branch_sync-first
+# surface binds the claim to the head this worker already holds.
+set +e
+SHADOWED=$(PATH="$FAKEBIN:$PATH" NM_LOG="$NM_LOG" NM_HEAD="$PIPELINE_HEAD" NM_BRANCH_SYNC_FIRST=1 \
+  NM_LOCAL_HEAD="$(git -C "$WORKTREE" rev-parse HEAD)" FM_HOME="$MATE_A" \
+  "$ROOT/bin/fm-validation-coordinate.sh" owner-result run-1 working "shadowed by branch_sync" 2>&1)
+RC=$?
+set -e
+[ "$RC" -ne 0 ] || fail "branch_sync.local shadowed the run block's own head and branch"
+assert_contains "$SHADOWED" "run head '$PIPELINE_HEAD' does not continue" \
+  "the claim did not bind the run block's own head"
+! grep -q 'shadowed by branch_sync' "$PARENT/state/mate-a.status" \
+  || fail "a shadowed-head report reached the parent channel"
 
 # While the pipeline still OWNS the branch the run is attributable without head
 # equality, but its lane head is not an object here, so the report says so

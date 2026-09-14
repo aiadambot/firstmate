@@ -174,18 +174,35 @@ verify_owner() {
   [ "$branch" = "$CLAIM_BRANCH" ] || die "worker branch no longer matches the claim"
 }
 
+# Scalar value of key $2 inside the top-level `run:` block of captured
+# `axi status` TOON $1, scoped the same way fm_nm_branch_sync_state scopes its
+# own read. The surface emits a second `branch:` and `head:` under
+# branch_sync.local - the worker copy's own branch and HEAD - and contracts no
+# order between the blocks, so an unscoped first-match read of the identity
+# fields can bind the claim to what this worker already holds.
+run_field() { # <toon-output> <key>
+  local value
+  value=$(printf '%s\n' "$1" \
+    | sed -n "/^[[:space:]]*run:[[:space:]]*\$/,/^[^[:space:]][^:]*:/s/^[[:space:]]\{1,\}$2:[[:space:]]*\(.*\)/\1/p" \
+    | head -1)
+  fm_nm_strip_quotes "$value"
+}
+
 axi_status_for_run() { # <run-id> <allow-bound-custody:0|1>
   local requested=$1 allow_custody=${2:-0} out actual branch run_head
   out=$(fm_nm_run_checked "$CLAIM_WORKTREE" 10 axi status --run "$requested") \
     || die "no-mistakes AXI status failed for run '$requested'"
-  actual=$(fm_nm_strip_quotes "$(fm_nm_field "$out" id)")
+  actual=$(run_field "$out" id)
   [ "$actual" = "$requested" ] || die "no-mistakes returned run '${actual:-unknown}', expected '$requested'"
-  branch=$(fm_nm_strip_quotes "$(fm_nm_field "$out" branch)")
+  branch=$(run_field "$out" branch)
   [ "$branch" = "$CLAIM_BRANCH" ] || die "no-mistakes run branch does not match the claim"
-  run_head=$(fm_nm_strip_quotes "$(fm_nm_field "$out" head)")
+  run_head=$(run_field "$out" head)
   if ! fm_nm_head_matches_worktree "$CLAIM_WORKTREE" "$run_head" \
     && { [ "$allow_custody" -ne 1 ] || ! fm_nm_run_is_pipeline_owned_active "$out"; }; then
-    die "no-mistakes run head '${run_head:-unknown}' does not continue the claimed worker identity: this copy holds no such commit, and the installed read-only AXI status surface exposes no immutable submitted-head provenance that could bind it to the claim"
+    if [ -n "$(fm_nm_resolve_commit "$CLAIM_WORKTREE" "$run_head")" ]; then
+      die "no-mistakes run head '$run_head' does not continue the claimed worker identity: this copy holds that commit, but it is an ancestor of, or diverged from, the claimed worker's current HEAD"
+    fi
+    die "no-mistakes run head '${run_head:-unknown}' does not continue the claimed worker identity: this copy cannot resolve it to a commit, and no read-only AXI status field has an established immutable submitted-head contract here that could bind it"
   fi
   printf '%s\n' "$out"
 }
@@ -382,7 +399,7 @@ cmd_owner_result() {
   verify_owner
   load_attached_run
   out=$(axi_status_for_run "$NM_RUN_ID" 1)
-  outcome=$(fm_nm_strip_quotes "$(fm_nm_field "$out" outcome)")
+  outcome=$(run_field "$out" outcome)
   case "$verb" in
     done)
       case "$outcome" in passed|checks-passed) ;; *) die "done requires a passed or checks-passed AXI outcome" ;; esac
@@ -394,7 +411,7 @@ cmd_owner_result() {
       fm_nm_run_is_active "$out" || die "$verb requires an active AXI run"
       ;;
   esac
-  run_head=$(fm_nm_strip_quotes "$(fm_nm_field "$out" head)")
+  run_head=$(run_field "$out" head)
   final_head=$(fm_nm_resolve_commit "$CLAIM_WORKTREE" "$run_head")
   FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-secondmate-report.sh" "$verb" "$CLAIM_CORR" \
     "validation run $run no-mistakes-run=$NM_RUN_ID axi-outcome=${outcome:-in-flight} axi-head=${final_head:-unresolved-in-this-copy} owner-reported by $CLAIM_TASK: $*"
