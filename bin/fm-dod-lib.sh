@@ -254,6 +254,7 @@ The task is complete only when committed on your branch \`fm/$id\`. Do NOT push,
 Keep your branch a clean fast-forward onto the current default branch - if \`main\` has advanced, rebase onto it so the eventual merge stays a fast-forward.
 When it is implemented and committed, append \`done: ready in branch fm/$id\` to the status file and stop.
 In a seeded local secondmate home, first run \`FM_HOME=<secondmate-home> bin/fm-local-ready.sh $id\` using Firstmate's code root, and include its full ready head in that status line.
+Your clone has no remote, so when \`main\` has advanced through another task, run \`FM_HOME=<secondmate-home> bin/fm-local-refresh.sh $id\` first to bring that default into your clone, then rebase onto it.
 The configured merge authority approves the ready branch, then the primary Firstmate lands it through \`bin/fm-merge-local.sh\`; a secondmate clone's local merge is never parent delivery.
 EOF
       ;;

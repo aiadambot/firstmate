@@ -183,21 +183,28 @@ fm_local_landed() { # child-home task-id; read-only teardown guard
 }
 
 fm_local_landed_receipt() { # child-home task-id; proof without the worker checkout
-  local ready_root ready head
+  local ready_root ready head branch_head landed
   fm_local_context_records "$1" "$2" || return 1
   ready_root="$FM_LOCAL_CHILD/data/$FM_LOCAL_TASK/local-ready/$FM_LOCAL_GENERATION_KEY"
   fm_local_dir "$ready_root" || return 1
+  branch_head=$(git -C "$FM_LOCAL_CLONE" rev-parse --verify --quiet "refs/heads/fm/$FM_LOCAL_TASK" || true)
+  if [ -n "$branch_head" ]; then
+    git -C "$FM_LOCAL_CLONE" merge-base --is-ancestor "$branch_head" "refs/heads/$FM_LOCAL_DEFAULT" || return 1
+  fi
+  landed=1
   for ready in "$ready_root"/*; do
-    fm_local_dir "$ready" || continue
+    fm_local_dir "$ready" || return 1
     head=${ready##*/}
-    FM_LOCAL_WT=$(fm_local_field "$ready/identity" worktree) || continue
-    fm_local_artifact "$head" || continue
+    # Every retained readiness of this generation must already be contained in
+    # the child default; one unlanded head is work this cleanup would destroy.
+    git -C "$FM_LOCAL_CLONE" merge-base --is-ancestor "$head" "refs/heads/$FM_LOCAL_DEFAULT" || return 1
+    FM_LOCAL_WT=$(fm_local_field "$ready/identity" worktree) || return 1
+    fm_local_artifact "$head" || return 1
     fm_local_file "$FM_LOCAL_RECEIPT" && cmp -s "$ready/identity" "$FM_LOCAL_RECEIPT" || continue
-    git -C "$FM_LOCAL_CLONE" merge-base --is-ancestor "$head" "refs/heads/$FM_LOCAL_DEFAULT" || continue
     git -C "$FM_LOCAL_PROJECT" merge-base --is-ancestor "$head" "refs/heads/$FM_LOCAL_DEFAULT" || continue
-    return 0
+    landed=0
   done
-  return 1
+  return "$landed"
 }
 
 # A child clone has no remote, so a parent default advanced by any other task is
@@ -222,9 +229,13 @@ fm_local_refresh() ( # child-home task-id
   base=$(git -C "$FM_LOCAL_PROJECT" rev-parse --verify "refs/heads/$FM_LOCAL_DEFAULT") || exit 1
   clone_default=$(git -C "$FM_LOCAL_CLONE" rev-parse --verify "refs/heads/$FM_LOCAL_DEFAULT") || exit 1
   if [ "$clone_default" != "$base" ]; then
+    # The clone already holds everything up to its own default, so only the
+    # advance is packed - and only once the parent proves it is a continuation.
+    git -C "$FM_LOCAL_PROJECT" merge-base --is-ancestor "$clone_default" "$base" \
+      || { fm_local_error 'child default diverged from the parent default; nothing was moved'; exit 1; }
     tmp=$(mktemp -d "$FM_LOCAL_CHILD/data/$task/.refresh.XXXXXX")
     # Local object transfer only: no remote, no refspec, no FETCH_HEAD.
-    git -C "$FM_LOCAL_PROJECT" bundle create "$tmp/default.bundle" "refs/heads/$FM_LOCAL_DEFAULT" >/dev/null 2>&1 || exit 1
+    git -C "$FM_LOCAL_PROJECT" bundle create "$tmp/default.bundle" "$clone_default..refs/heads/$FM_LOCAL_DEFAULT" >/dev/null 2>&1 || exit 1
     git -C "$FM_LOCAL_CLONE" bundle verify "$tmp/default.bundle" >/dev/null || exit 1
     imported=$(git -C "$FM_LOCAL_CLONE" bundle unbundle "$tmp/default.bundle") || exit 1
     [ "$imported" = "$base refs/heads/$FM_LOCAL_DEFAULT" ] || exit 1
@@ -297,7 +308,7 @@ fm_local_land() ( # parent-home mate-id task-id approved-full-head
     [ "$imported" = "$head refs/heads/fm/$task" ] || exit 1
     git -C "$FM_LOCAL_PROJECT" merge-base --is-ancestor "$head" "refs/heads/$FM_LOCAL_DEFAULT" \
       || git -C "$FM_LOCAL_PROJECT" merge-base --is-ancestor "refs/heads/$FM_LOCAL_DEFAULT" "$head" \
-      || { fm_local_error 'parent default diverged; rebase and publish a new ready head'; exit 1; }
+      || { fm_local_error 'parent default diverged; run FM_HOME=<child> bin/fm-local-refresh.sh <task-id>, rebase and publish a new ready head'; exit 1; }
     tmp=$(mktemp "$receipt_dir/.landing.XXXXXX")
     cat "$FM_LOCAL_READY/identity" > "$tmp"
     chmod 400 "$tmp"

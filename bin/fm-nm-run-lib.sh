@@ -283,6 +283,27 @@ fm_nm_branch_sync_state() {  # <toon-output>
   fm_nm_strip_quotes "$s"
 }
 
+# Value of key $2 inside the top-level branch_sync.local sub-block of captured
+# `axi status` TOON $1: the worker branch and head the daemon itself recorded
+# for this run. Empty when the block, the sub-block or the key is absent.
+fm_nm_branch_sync_local_field() {  # <toon-output> <branch|head|clean>
+  local value
+  value=$(printf '%s\n' "$1" | awk -v key="$2" '
+    /^[^[:space:]]/ { in_sync = ($0 ~ /^branch_sync:[[:space:]]*$/); in_local = 0; next }
+    in_sync && match($0, /^[[:space:]]+/) {
+      indent = RLENGTH
+      line = substr($0, indent + 1)
+      if (indent <= 2) { in_local = (line ~ /^local:[[:space:]]*$/); next }
+      if (in_local && index(line, key ":") == 1) {
+        sub(/^[^:]*:[[:space:]]*/, "", line)
+        print line
+        exit
+      }
+    }
+  ')
+  fm_nm_strip_quotes "$value"
+}
+
 # 0 if the run in captured `axi status` TOON $1 is still in flight: no
 # terminal outcome and no terminal status.
 fm_nm_run_is_active() {  # <toon-output>

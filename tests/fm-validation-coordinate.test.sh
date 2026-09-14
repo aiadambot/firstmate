@@ -224,6 +224,9 @@ printf 'run:\n  id: %s\n  branch: validation\n  head: %s\n  status: %s\n' "$run_
 [ -z "${NM_OUTCOME:-}" ] || printf '  outcome: %s\n' "$NM_OUTCOME"
 if [ "${NM_FOREIGN_ACTIVE:-0}" = 1 ]; then
   printf 'branch_sync:\n  state: pipeline_owned\n'
+elif [ -n "${NM_LOCAL_HEAD:-}" ]; then
+  printf 'branch_sync:\n  state: %s\n  local:\n    branch: %s\n    head: "%s"\n    clean: true\n' \
+    "${NM_SYNC_STATE:-local_owned}" "${NM_LOCAL_BRANCH:-validation}" "$NM_LOCAL_HEAD"
 fi
 SH
 chmod +x "$FAKEBIN/no-mistakes"
@@ -340,5 +343,43 @@ PATH="$FAKEBIN:$PATH" NM_LOG="$NM_LOG" NM_HEAD="$ADVANCED_HEAD" FM_HOME="$MATE_A
 assert_contains "$(cat "$PARENT/state/mate-a.status")" \
   "working [corr=$CORR]: validation run run-1 owner-reported by validator: pipeline fix head captured" \
   "a run-attributed pipeline head advance could not continue reporting"
+
+# The real terminal shape: the pipeline's own fix commits finish the run, so its
+# final head is not an object this worker copy has. The daemon's branch_sync
+# record of this worker's branch and head is what proves the identity.
+PIPELINE_HEAD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+set +e
+UNPROVEN=$(PATH="$FAKEBIN:$PATH" NM_LOG="$NM_LOG" NM_HEAD="$PIPELINE_HEAD" NM_STATUS=completed \
+  NM_OUTCOME=passed FM_HOME="$MATE_A" \
+  "$ROOT/bin/fm-validation-coordinate.sh" owner-result run-1 'done' "no provenance" 2>&1)
+RC=$?
+set -e
+[ "$RC" -ne 0 ] || fail "a terminal run with no branch_sync provenance was accepted"
+assert_contains "$UNPROVEN" "run head does not continue" "unprovenanced terminal refusal was not explicit"
+
+set +e
+FOREIGN_LOCAL=$(PATH="$FAKEBIN:$PATH" NM_LOG="$NM_LOG" NM_HEAD="$PIPELINE_HEAD" NM_STATUS=completed \
+  NM_OUTCOME=passed NM_LOCAL_HEAD=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb FM_HOME="$MATE_A" \
+  "$ROOT/bin/fm-validation-coordinate.sh" owner-result run-1 'done' "foreign worker" 2>&1)
+RC=$?
+set -e
+[ "$RC" -ne 0 ] || fail "a terminal run recorded against another worker head was accepted"
+assert_contains "$FOREIGN_LOCAL" "run head does not continue" "changed-identity terminal refusal was not explicit"
+
+set +e
+FOREIGN_BRANCH=$(PATH="$FAKEBIN:$PATH" NM_LOG="$NM_LOG" NM_HEAD="$PIPELINE_HEAD" NM_STATUS=completed \
+  NM_OUTCOME=passed NM_LOCAL_HEAD="$ADVANCED_HEAD" NM_LOCAL_BRANCH=other-branch FM_HOME="$MATE_A" \
+  "$ROOT/bin/fm-validation-coordinate.sh" owner-result run-1 'done' "foreign branch" 2>&1)
+RC=$?
+set -e
+[ "$RC" -ne 0 ] || fail "a terminal run recorded against another branch was accepted"
+assert_contains "$FOREIGN_BRANCH" "run head does not continue" "foreign-branch terminal refusal was not explicit"
+
+PATH="$FAKEBIN:$PATH" NM_LOG="$NM_LOG" NM_HEAD="$PIPELINE_HEAD" NM_STATUS=completed \
+  NM_OUTCOME=passed NM_LOCAL_HEAD="$ADVANCED_HEAD" FM_HOME="$MATE_A" \
+  "$ROOT/bin/fm-validation-coordinate.sh" owner-result run-1 'done' "pipeline fixes passed" >/dev/null
+assert_contains "$(cat "$PARENT/state/mate-a.status")" \
+  "done [corr=$CORR]: validation run run-1 owner-reported by validator: pipeline fixes passed" \
+  "a terminal run finished by pipeline commits could not be reported"
 
 pass "validation coordination keeps one global owner and correlates owner-reported evidence"

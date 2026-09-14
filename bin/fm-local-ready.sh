@@ -27,7 +27,7 @@ fm_local_context "$FM_HOME" "$1" || exit 1
 HEAD=$(git -C "$FM_LOCAL_WT" rev-parse HEAD)
 fm_local_worker_matches "$HEAD" || { fm_local_error 'worker branch/head is not clean and ready'; exit 1; }
 BASE=$(git -C "$FM_LOCAL_PROJECT" rev-parse "refs/heads/$FM_LOCAL_DEFAULT")
-git -C "$FM_LOCAL_WT" merge-base --is-ancestor "$BASE" "$HEAD" || { fm_local_error 'rebase onto the current parent default before ready'; exit 1; }
+git -C "$FM_LOCAL_WT" merge-base --is-ancestor "$BASE" "$HEAD" || { fm_local_error "run FM_HOME=$FM_HOME bin/fm-local-refresh.sh $1, then rebase onto the current parent default before ready"; exit 1; }
 READY_ROOT="$FM_HOME/data/$1/local-ready"
 fm_local_dir "$FM_HOME/data" && fm_local_dir "$FM_HOME/data/$1" \
   || { fm_local_error "missing task data directory $FM_HOME/data/$1"; exit 1; }

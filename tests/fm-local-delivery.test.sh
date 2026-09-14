@@ -470,6 +470,29 @@ test_teardown_refuses_missing_or_advanced_worker() {
     "landed reassigned-slot teardown removed the reassigned checkout"
   assert_present "$(receipt_for "$world" "$artifact")" \
     "landed reassigned-slot teardown removed the parent landing receipt"
+
+  world=$(make_world newer-unlanded)
+  ready_out=$(run_ready "$world") || fail "newer-unlanded: first ready failed"
+  head=$(git -C "$world/worker" rev-parse HEAD)
+  run_land "$world" "$head" >/dev/null 2> "$world/land.err" \
+    || fail "newer-unlanded: landing failed: $(cat "$world/land.err")"
+  printf 'more work\n' > "$world/worker/later.txt"
+  git -C "$world/worker" add later.txt
+  git -C "$world/worker" commit -qm 'work past the landed head'
+  ready_out=$(run_ready "$world") || fail "newer-unlanded: second ready failed"
+  artifact=$(ready_artifact "$ready_out")
+  : > "$TMP_ROOT/treehouse-state.json"
+  printf 'task=other-task\nhome=%s\n' "$world/child" > "$world/.fm-slot-owner"
+  set +e
+  run_child_teardown "$world" > "$world/teardown3.out" 2> "$world/teardown3.err"
+  rc=$?
+  set -e
+  rm -f "$TMP_ROOT/treehouse-state.json"
+  [ "$rc" -ne 0 ] || fail "a historical landed receipt let cleanup discard newer unlanded readiness"
+  assert_present "$artifact/ready.bundle" \
+    "reassigned-slot cleanup discarded the newer unlanded ready bundle"
+  assert_present "$world/child/state/local-task.meta" \
+    "reassigned-slot cleanup discarded the task record while newer work was unlanded"
   pass "teardown preserves a missing worker record, a newer task branch beyond the receipted head, and an unlanded reassigned slot while a landed one still cleans up"
 }
 
