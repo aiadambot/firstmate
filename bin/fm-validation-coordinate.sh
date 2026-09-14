@@ -13,6 +13,11 @@
 #   fm-validation-coordinate.sh status <run>
 #   fm-validation-coordinate.sh owner-result <run> <verb> <note...>
 #
+# claim reports the claim once through fm-secondmate-report.sh and then records
+# a durable receipt. A crash between the report and the receipt makes the next
+# claim repeat that one progress line: reporting is at-least-once, not
+# exactly-once.
+#
 # attach-run records an ownership association; it does not attach to or drive
 # the pipeline. status uses the installed no-mistakes public read-only AXI
 # interface. No command starts, reattaches to, responds to, or drives a run.
@@ -267,17 +272,13 @@ cmd_claim() {
   else
     mv "$tmp" "$CLAIM" || die "cannot publish validation claim"
   fi
-  local report_receipt destination report_note report_line report_tmp
+  local report_receipt report_note report_tmp
   report_receipt="$CLAIM.reported"
   if ! safe_file "$report_receipt"; then
     [ ! -e "$report_receipt" ] && [ ! -L "$report_receipt" ] \
       || die "validation claim report receipt is unsafe"
     report_note="validation run $run exclusively claimed by $task at $branch/$head"
-    destination=$(fm_parent_channel_destination "$FM_HOME" "$FM_HOME/state") \
-      || die "cannot resolve the coordinator parent channel"
-    report_line="working [corr=$(printf '%s' "$corr" | tr 'A-F' 'a-f')]: $report_note (via-helper)"
-    grep -Fx "$report_line" "$destination" >/dev/null 2>&1 \
-      || FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-secondmate-report.sh" working "$corr" "$report_note"
+    FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-secondmate-report.sh" working "$corr" "$report_note"
     report_tmp=$(mktemp "$CLAIM_DIR/.reported.XXXXXX") || die "cannot stage validation claim report receipt"
     printf 'schema=fm-validation-claim-report.v1\n' > "$report_tmp"
     chmod 600 "$report_tmp" 2>/dev/null || true

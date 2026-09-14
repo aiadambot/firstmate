@@ -1114,13 +1114,13 @@ if [ "$FAILED" -ne 0 ]; then
   exit 1
 fi
 
-for key in "${TO_MOVE[@]}"; do
+for key in "${TO_MOVE[@]+"${TO_MOVE[@]}"}"; do
   validate_local_only_item_route "$ID" "$MAIN_BACKLOG" "$key" 0 "$SUB_HOME" || {
     echo "       nothing was moved." >&2
     exit 1
   }
 done
-for key in "${ALREADY[@]}"; do
+for key in "${ALREADY[@]+"${ALREADY[@]}"}"; do
   validate_local_only_item_route "$ID" "$SUB_BACKLOG" "$key" 0 "$SUB_HOME" || exit 1
 done
 

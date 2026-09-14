@@ -114,12 +114,17 @@ assert_contains "$(cat "$PARENT/state/mate-a.status")" "working [corr=$CORR]: va
 FM_HOME="$MATE_A" "$ROOT/bin/fm-validation-coordinate.sh" claim run-1 "$CORR" "$WORKER" validator >/dev/null
 [ "$(grep -c "exclusively claimed" "$PARENT/state/mate-a.status")" -eq 1 ] \
   || fail "an idempotent claim retry duplicated parent progress"
+# The receipt is the single report-once gate, so reporting is at-least-once:
+# a claim interrupted before its receipt lands repeats that one progress line.
 rm "$PARENT/state/validation-runs/run-1.claim.reported"
 FM_HOME="$MATE_A" "$ROOT/bin/fm-validation-coordinate.sh" claim run-1 "$CORR" "$WORKER" validator >/dev/null
-[ "$(grep -c "exclusively claimed" "$PARENT/state/mate-a.status")" -eq 1 ] \
-  || fail "claim retry after a lost report receipt duplicated parent progress"
+[ "$(grep -c "exclusively claimed" "$PARENT/state/mate-a.status")" -eq 2 ] \
+  || fail "claim retry after a lost report receipt did not re-report parent progress"
 [ -f "$PARENT/state/validation-runs/run-1.claim.reported" ] \
   || fail "claim retry did not recover its report receipt"
+FM_HOME="$MATE_A" "$ROOT/bin/fm-validation-coordinate.sh" claim run-1 "$CORR" "$WORKER" validator >/dev/null
+[ "$(grep -c "exclusively claimed" "$PARENT/state/mate-a.status")" -eq 2 ] \
+  || fail "a recovered report receipt did not suppress the next claim report"
 
 MATE_COPY="$TMP_ROOT/mate-a-copy"
 mkdir -p "$MATE_COPY/state"
