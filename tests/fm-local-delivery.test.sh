@@ -396,6 +396,53 @@ test_parent_advance_is_reachable_through_refresh() {
   pass "a parent default advanced by another task is reachable through an explicit local refresh and rebase"
 }
 
+test_superseded_readiness_does_not_block_landed_cleanup() {
+  local world child base first_ready first_artifact head_a head_b second_ready second_artifact rc
+
+  world=$(make_world superseded-ready)
+  child="$world/child"
+
+  first_ready=$(run_ready "$world") || fail "superseded-ready: first ready failed"
+  first_artifact=$(ready_artifact "$first_ready")
+  head_a=$(git -C "$world/worker" rev-parse HEAD)
+
+  printf 'parent work\n' > "$world/parent/projects/alpha/parent.txt"
+  git -C "$world/parent/projects/alpha" add parent.txt
+  git -C "$world/parent/projects/alpha" commit -qm 'another task landed in the parent'
+  base=$(git -C "$world/parent/projects/alpha" rev-parse HEAD)
+  run_refresh "$world" >/dev/null || fail "superseded-ready: refresh failed"
+  git -C "$world/worker" rebase --quiet "$base" \
+    || fail "superseded-ready: worker could not rebase onto the refreshed base"
+
+  second_ready=$(run_ready "$world") || fail "superseded-ready: second ready failed"
+  second_artifact=$(ready_artifact "$second_ready")
+  head_b=$(git -C "$world/worker" rev-parse HEAD)
+  [ "$head_a" != "$head_b" ] || fail "superseded-ready: the rebase did not produce a new head"
+  run_land "$world" "$head_b" >/dev/null 2> "$world/land.err" \
+    || fail "superseded-ready: landing failed: $(cat "$world/land.err")"
+
+  assert_present "$first_artifact/identity" "landing discarded the superseded pre-rebase readiness"
+  ! git -C "$child/projects/alpha" merge-base --is-ancestor "$head_a" refs/heads/main \
+    || fail "superseded-ready: the pre-rebase head was still contained in the child default"
+
+  : > "$TMP_ROOT/treehouse-state.json"
+  printf 'task=other-task\nhome=%s\n' "$child" > "$world/.fm-slot-owner"
+  set +e
+  run_child_teardown "$world" > "$world/teardown.out" 2> "$world/teardown.err"
+  rc=$?
+  set -e
+  rm -f "$TMP_ROOT/treehouse-state.json"
+  [ "$rc" -eq 0 ] \
+    || fail "a superseded pre-rebase readiness blocked cleanup of landed receipt-proven work: $(cat "$world/teardown.err")"
+  assert_absent "$child/state/local-task.meta" \
+    "superseded-readiness teardown left its task record behind"
+  assert_present "$(receipt_for "$world" "$second_artifact")" \
+    "superseded-readiness teardown removed the parent landing receipt"
+  assert_present "$world/.fm-slot-owner" \
+    "superseded-readiness teardown removed the new owner's slot claim"
+  pass "a proven-superseded pre-rebase readiness cannot permanently block cleanup of landed work"
+}
+
 test_teardown_refuses_missing_or_advanced_worker() {
   local world head later rc ready_out artifact
 
@@ -695,6 +742,9 @@ case ${FM_LOCAL_DELIVERY_TEST_CASE:-all} in
   receipt-recovery)
     test_landing_recovers_receipt_after_parent_progress
     ;;
+  superseded-ready)
+    test_superseded_readiness_does_not_block_landed_cleanup
+    ;;
   child-sync)
     test_happy_lifecycle
     test_child_local_merge_is_not_parent_landing
@@ -709,6 +759,7 @@ case ${FM_LOCAL_DELIVERY_TEST_CASE:-all} in
     test_child_sync_failure_is_receipted_and_retryable
     test_child_default_refusals_preserve_both_repositories
     test_teardown_refuses_missing_or_advanced_worker
+    test_superseded_readiness_does_not_block_landed_cleanup
     test_parent_advance_is_reachable_through_refresh
     test_reused_task_same_head_has_distinct_delivery_identity
     test_landing_refusals_preserve_work

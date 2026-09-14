@@ -222,22 +222,19 @@ run_id=${4:-}
 head=${NM_HEAD:-deadbeef}
 printf 'run:\n  id: %s\n  branch: validation\n  head: %s\n  status: %s\n' "$run_id" "$head" "${NM_STATUS:-running}"
 [ -z "${NM_OUTCOME:-}" ] || printf '  outcome: %s\n' "$NM_OUTCOME"
-if [ "${NM_FOREIGN_ACTIVE:-0}" = 1 ]; then
+if [ "${NM_PIPELINE_OWNED:-0}" = 1 ]; then
   printf 'branch_sync:\n  state: pipeline_owned\n'
-elif [ -n "${NM_LOCAL_HEAD:-}" ]; then
-  printf 'branch_sync:\n  state: %s\n  local:\n    branch: %s\n    head: "%s"\n    clean: true\n' \
-    "${NM_SYNC_STATE:-local_owned}" "${NM_LOCAL_BRANCH:-validation}" "$NM_LOCAL_HEAD"
 fi
 SH
 chmod +x "$FAKEBIN/no-mistakes"
 NM_HEAD=$(git -C "$WORKTREE" rev-parse HEAD)
 set +e
-FOREIGN_ACTIVE=$(PATH="$FAKEBIN:$PATH" NM_LOG="$NM_LOG" NM_FOREIGN_ACTIVE=1 FM_HOME="$MATE_A" \
+FOREIGN_ACTIVE=$(PATH="$FAKEBIN:$PATH" NM_LOG="$NM_LOG" NM_PIPELINE_OWNED=1 FM_HOME="$MATE_A" \
   "$ROOT/bin/fm-validation-coordinate.sh" attach-run run-1 fixture-run 2>&1)
 RC=$?
 set -e
 [ "$RC" -ne 0 ] || fail "first attach trusted unanchored pipeline-owned custody"
-assert_contains "$FOREIGN_ACTIVE" "run head does not continue" \
+assert_contains "$FOREIGN_ACTIVE" "does not continue the claimed worker identity" \
   "unanchored active-run refusal was not explicit"
 
 PATH="$FAKEBIN:$PATH" NM_LOG="$NM_LOG" NM_HEAD="$NM_HEAD" FM_HOME="$MATE_A" \
@@ -310,8 +307,8 @@ assert_contains "$PREMATURE" "done requires a passed or checks-passed AXI outcom
 PATH="$FAKEBIN:$PATH" NM_LOG="$NM_LOG" NM_HEAD="$NM_HEAD" NM_OUTCOME=checks-passed FM_HOME="$MATE_A" \
   "$ROOT/bin/fm-validation-coordinate.sh" owner-result run-1 'done' "review evidence captured" >/dev/null
 assert_contains "$(cat "$PARENT/state/mate-a.status")" \
-  "done [corr=$CORR]: validation run run-1 owner-reported by validator: review evidence captured" \
-  "owner result lost its request correlation or evidence classification"
+  "done [corr=$CORR]: validation run run-1 no-mistakes-run=fixture-run axi-outcome=checks-passed axi-head=$NM_HEAD owner-reported by validator: review evidence captured" \
+  "owner result lost its correlation, attached run id, authoritative outcome, or proven head"
 
 mv "$PARENT/state/validation-runs" "$PARENT/state/validation-runs-real"
 ln -s "$PARENT/state/validation-runs-real" "$PARENT/state/validation-runs"
@@ -335,18 +332,19 @@ STALE=$(PATH="$FAKEBIN:$PATH" NM_LOG="$NM_LOG" NM_HEAD="$NM_HEAD" NM_OUTCOME=che
 RC=$?
 set -e
 [ "$RC" -ne 0 ] || fail "a changed worker head reported against the old validation run"
-assert_contains "$STALE" "run head does not continue" "stale-head refusal was not explicit"
+assert_contains "$STALE" "does not continue the claimed worker identity" "stale-head refusal was not explicit"
 
 ADVANCED_HEAD=$(git -C "$WORKTREE" rev-parse HEAD)
 PATH="$FAKEBIN:$PATH" NM_LOG="$NM_LOG" NM_HEAD="$ADVANCED_HEAD" FM_HOME="$MATE_A" \
   "$ROOT/bin/fm-validation-coordinate.sh" owner-result run-1 working "pipeline fix head captured" >/dev/null
 assert_contains "$(cat "$PARENT/state/mate-a.status")" \
-  "working [corr=$CORR]: validation run run-1 owner-reported by validator: pipeline fix head captured" \
+  "working [corr=$CORR]: validation run run-1 no-mistakes-run=fixture-run axi-outcome=in-flight axi-head=$ADVANCED_HEAD owner-reported by validator: pipeline fix head captured" \
   "a run-attributed pipeline head advance could not continue reporting"
 
-# The real terminal shape: the pipeline's own fix commits finish the run, so its
-# final head is not an object this worker copy has. The daemon's branch_sync
-# record of this worker's branch and head is what proves the identity.
+# A terminal run's final head is routinely a pipeline commit this copy never
+# received. No read-only AXI status field binds such a head to the claimed
+# submitted code, so the claim refuses instead of inventing provenance, and the
+# refusal names the missing upstream capability.
 PIPELINE_HEAD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 set +e
 UNPROVEN=$(PATH="$FAKEBIN:$PATH" NM_LOG="$NM_LOG" NM_HEAD="$PIPELINE_HEAD" NM_STATUS=completed \
@@ -354,32 +352,20 @@ UNPROVEN=$(PATH="$FAKEBIN:$PATH" NM_LOG="$NM_LOG" NM_HEAD="$PIPELINE_HEAD" NM_ST
   "$ROOT/bin/fm-validation-coordinate.sh" owner-result run-1 'done' "no provenance" 2>&1)
 RC=$?
 set -e
-[ "$RC" -ne 0 ] || fail "a terminal run with no branch_sync provenance was accepted"
-assert_contains "$UNPROVEN" "run head does not continue" "unprovenanced terminal refusal was not explicit"
+[ "$RC" -ne 0 ] || fail "a terminal run whose final head this copy cannot resolve was accepted"
+assert_contains "$UNPROVEN" "does not continue the claimed worker identity" "unresolvable terminal refusal was not explicit"
+assert_contains "$UNPROVEN" "no immutable submitted-head provenance" \
+  "the terminal refusal did not name the missing upstream capability"
+! grep -q 'no provenance' "$PARENT/state/mate-a.status" \
+  || fail "a refused terminal report still published a parent channel line"
 
-set +e
-FOREIGN_LOCAL=$(PATH="$FAKEBIN:$PATH" NM_LOG="$NM_LOG" NM_HEAD="$PIPELINE_HEAD" NM_STATUS=completed \
-  NM_OUTCOME=passed NM_LOCAL_HEAD=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb FM_HOME="$MATE_A" \
-  "$ROOT/bin/fm-validation-coordinate.sh" owner-result run-1 'done' "foreign worker" 2>&1)
-RC=$?
-set -e
-[ "$RC" -ne 0 ] || fail "a terminal run recorded against another worker head was accepted"
-assert_contains "$FOREIGN_LOCAL" "run head does not continue" "changed-identity terminal refusal was not explicit"
-
-set +e
-FOREIGN_BRANCH=$(PATH="$FAKEBIN:$PATH" NM_LOG="$NM_LOG" NM_HEAD="$PIPELINE_HEAD" NM_STATUS=completed \
-  NM_OUTCOME=passed NM_LOCAL_HEAD="$ADVANCED_HEAD" NM_LOCAL_BRANCH=other-branch FM_HOME="$MATE_A" \
-  "$ROOT/bin/fm-validation-coordinate.sh" owner-result run-1 'done' "foreign branch" 2>&1)
-RC=$?
-set -e
-[ "$RC" -ne 0 ] || fail "a terminal run recorded against another branch was accepted"
-assert_contains "$FOREIGN_BRANCH" "run head does not continue" "foreign-branch terminal refusal was not explicit"
-
-PATH="$FAKEBIN:$PATH" NM_LOG="$NM_LOG" NM_HEAD="$PIPELINE_HEAD" NM_STATUS=completed \
-  NM_OUTCOME=passed NM_LOCAL_HEAD="$ADVANCED_HEAD" FM_HOME="$MATE_A" \
-  "$ROOT/bin/fm-validation-coordinate.sh" owner-result run-1 'done' "pipeline fixes passed" >/dev/null
+# While the pipeline still OWNS the branch the run is attributable without head
+# equality, but its lane head is not an object here, so the report says so
+# rather than naming a head it cannot prove.
+PATH="$FAKEBIN:$PATH" NM_LOG="$NM_LOG" NM_HEAD="$PIPELINE_HEAD" NM_PIPELINE_OWNED=1 FM_HOME="$MATE_A" \
+  "$ROOT/bin/fm-validation-coordinate.sh" owner-result run-1 working "pipeline holds the branch" >/dev/null
 assert_contains "$(cat "$PARENT/state/mate-a.status")" \
-  "done [corr=$CORR]: validation run run-1 owner-reported by validator: pipeline fixes passed" \
-  "a terminal run finished by pipeline commits could not be reported"
+  "working [corr=$CORR]: validation run run-1 no-mistakes-run=fixture-run axi-outcome=in-flight axi-head=unresolved-in-this-copy owner-reported by validator: pipeline holds the branch" \
+  "an unresolvable pipeline lane head was reported as a proven validated head"
 
 pass "validation coordination keeps one global owner and correlates owner-reported evidence"

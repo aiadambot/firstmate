@@ -187,6 +187,9 @@ fm_local_landed_receipt() { # child-home task-id; proof without the worker check
   fm_local_context_records "$1" "$2" || return 1
   ready_root="$FM_LOCAL_CHILD/data/$FM_LOCAL_TASK/local-ready/$FM_LOCAL_GENERATION_KEY"
   fm_local_dir "$ready_root" || return 1
+  # The task branch tip is the worker's own latest line: an unlanded tip is live
+  # work this cleanup would destroy. A retained readiness the tip already left
+  # behind is history, and only fails to prove the landing through its own entry.
   branch_head=$(git -C "$FM_LOCAL_CLONE" rev-parse --verify --quiet "refs/heads/fm/$FM_LOCAL_TASK" || true)
   if [ -n "$branch_head" ]; then
     git -C "$FM_LOCAL_CLONE" merge-base --is-ancestor "$branch_head" "refs/heads/$FM_LOCAL_DEFAULT" || return 1
@@ -195,12 +198,10 @@ fm_local_landed_receipt() { # child-home task-id; proof without the worker check
   for ready in "$ready_root"/*; do
     fm_local_dir "$ready" || return 1
     head=${ready##*/}
-    # Every retained readiness of this generation must already be contained in
-    # the child default; one unlanded head is work this cleanup would destroy.
-    git -C "$FM_LOCAL_CLONE" merge-base --is-ancestor "$head" "refs/heads/$FM_LOCAL_DEFAULT" || return 1
     FM_LOCAL_WT=$(fm_local_field "$ready/identity" worktree) || return 1
     fm_local_artifact "$head" || return 1
     fm_local_file "$FM_LOCAL_RECEIPT" && cmp -s "$ready/identity" "$FM_LOCAL_RECEIPT" || continue
+    git -C "$FM_LOCAL_CLONE" merge-base --is-ancestor "$head" "refs/heads/$FM_LOCAL_DEFAULT" || continue
     git -C "$FM_LOCAL_PROJECT" merge-base --is-ancestor "$head" "refs/heads/$FM_LOCAL_DEFAULT" || continue
     landed=0
   done
