@@ -345,7 +345,11 @@ validate_local_only_item_route() { # <secondmate-id> <backlog> <key> <remote:0|1
   local id=$1 backlog=$2 key=$3 remote=$4 home=${5:-} project mode projects source child
   local expected_source expected_git_dir actual_source actual_git_dir parent_home source_top child_top child_git_dir
   project=$(backlog_key_repo "$backlog" "$key" 2>/dev/null || true)
-  [ -n "$project" ] || return 0
+  if [ -z "$project" ]; then
+    [ "$remote" = 0 ] && return 0
+    echo "error: refusing to hand off item $key to remote secondmate $id: item has no (repo: ...) annotation; remote handoffs require a resolved project" >&2
+    return 1
+  fi
   read -r mode _ <<EOF
 $(FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" "$FM_ROOT/bin/fm-project-mode.sh" "$project" 2>/dev/null)
 EOF

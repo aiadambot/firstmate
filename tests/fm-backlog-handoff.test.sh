@@ -128,6 +128,27 @@ EOF
   pass "remote routes refuse local-only items before staging"
 }
 
+test_remote_unannotated_handoff_is_refused_before_staging() {
+  local home="$TMP_ROOT/remote-unannotated-main" remote_home=/srv/firstmate-unannotated
+  mkdir -p "$home/data" "$home/state"
+  printf -- '- remote - remote route (host: lab; root: /srv/firstmate-code; home: %s; scope: local work; projects: alpha; added 2026-09-14)\n' \
+    "$remote_home" > "$home/data/secondmates.md"
+  cat > "$home/data/backlog.md" <<'EOF'
+## Queued
+- [ ] remote-unannotated - carries no repo annotation
+
+## Done
+EOF
+  if FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" "$ROOT/bin/fm-backlog-handoff.sh" remote remote-unannotated >"$TMP_ROOT/remote-unannotated.out" 2>&1; then
+    fail "remote handoff accepted an unannotated item"
+  fi
+  assert_grep 'remote handoffs require a resolved project' "$TMP_ROOT/remote-unannotated.out" \
+    "remote unannotated refusal was not explained"
+  assert_grep 'remote-unannotated' "$home/data/backlog.md" "remote unannotated refusal changed the parent backlog"
+  assert_absent "$home/data/handoff/remote.outbox.md" "remote unannotated refusal staged an outbox"
+  pass "remote routes refuse unannotated items before staging"
+}
+
 inbox_body_stream() { # <state-dir> <task-id>
   local rec
   for rec in "$1/$2.inbox"/*.msg; do
@@ -1436,6 +1457,7 @@ EOF
 test_handoff_wakes_live_local_receiver
 test_local_only_handoff_requires_bound_local_project
 test_remote_local_only_handoff_is_refused_before_staging
+test_remote_unannotated_handoff_is_refused_before_staging
 test_failed_wake_retries_when_the_item_is_already_present
 test_known_receiver_failure_remains_retryable_after_grace
 test_known_failure_restores_retry_after_reconciliation_race
