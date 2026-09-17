@@ -200,7 +200,7 @@ fm_local_landed_receipt() { # child-home task-id; proof without the worker check
     head=${ready##*/}
     FM_LOCAL_WT=$(fm_local_field "$ready/identity" worktree) || return 1
     fm_local_artifact "$head" || return 1
-    fm_local_file "$FM_LOCAL_RECEIPT" && cmp -s "$ready/identity" "$FM_LOCAL_RECEIPT" || continue
+    if ! fm_local_file "$FM_LOCAL_RECEIPT" || ! cmp -s "$ready/identity" "$FM_LOCAL_RECEIPT"; then continue; fi
     git -C "$FM_LOCAL_CLONE" merge-base --is-ancestor "$head" "refs/heads/$FM_LOCAL_DEFAULT" || continue
     git -C "$FM_LOCAL_PROJECT" merge-base --is-ancestor "$head" "refs/heads/$FM_LOCAL_DEFAULT" || continue
     landed=0
