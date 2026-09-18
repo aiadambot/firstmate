@@ -1,0 +1,2 @@
+error: no backlog or pending outbox item matched: typo-key
+       nothing new was staged.

@@ -1,0 +1,8 @@
+tmp: /tmp/fm-evidence-review.iSgsSp
+--- A: typo-key remote handoff (exit=1) ---
+error: no backlog or pending outbox item matched: typo-key
+       nothing new was staged.
+--- B: refresh with failing bundle create (exit=1) ---
+REFUSED: local delivery: could not pack the parent default advance; nothing was moved
+child main before=e27477a1d57907b74155563dc9d2700009ddc790 after=e27477a1d57907b74155563dc9d2700009ddc790 (unchanged: yes)
+EVIDENCE: both scenarios behaved as intended
