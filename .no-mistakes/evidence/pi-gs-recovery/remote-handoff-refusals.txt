@@ -1,0 +1,18 @@
+=== Remote handoff refusals name their cause (fail-closed routing) ===
+--- 1. unannotated item -> remote mate
+error: refusing to hand off item plain-item to remote secondmate ios: item has no (repo: ...) annotation; remote handoffs require a resolved project
+exit=1
+--- 2. annotation resolves to no registered project (repo: alpa, typo of alpha)
+error: refusing to hand off item typo-item to remote secondmate ios: project alpa is not registered in data/projects.md; remote handoffs require a resolved project
+exit=1
+--- 3. requested key exists nowhere -> existing missing-key classifier, not a repo refusal
+error: no backlog or pending outbox item matched: ghost-item
+       nothing new was staged.
+exit=1
+--- 4. registered local-only project -> remote mate
+error: refusing to hand off local-only item local-item for project alpha to remote secondmate ios
+exit=1
+--- backlog intact (all 3 items retained):
+3
+--- nothing staged:
+(no outbox created)

@@ -1,0 +1,13 @@
+ok - local-only seed, handoff, immutable ready, parent landing, idempotency, and receipt-backed cleanup
+ok - a child-local merge cannot stand in for parent landing authority
+ok - ready refuses uncommitted worker state without publishing
+ok - landing retry restores a missing receipt after the parent advances beyond the approved head
+ok - a receipt-before-child-sync failure preserves work and retries through synchronization and teardown
+ok - dirty or diverged child default branches refuse before parent landing and preserve both repositories
+ok - teardown preserves a missing worker record, a newer task branch beyond the receipted head, and an unlanded reassigned slot while a landed one still cleans up
+/tmp/fm-local-delivery.UoeKlR/superseded-ready/child/data/local-task/.refresh.PnSyc0/default.bundle is okay
+ok - a proven-superseded pre-rebase readiness cannot permanently block cleanup of landed work
+/tmp/fm-local-delivery.UoeKlR/parent-advance/child/data/local-task/.refresh.QwZ6Ts/default.bundle is okay
+ok - a parent default advanced by another task is reachable through an explicit local refresh and rebase
+ok - same-head reused task generations keep distinct artifacts and receipts while retries stay idempotent
+ok - delivery refuses dirty, diverged, foreign, changed, symlinked, duplicate, and alias identities without discarding work

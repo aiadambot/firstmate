@@ -1,0 +1,1 @@
+ok - validation coordination keeps one global owner and correlates owner-reported evidence
