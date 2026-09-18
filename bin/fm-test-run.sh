@@ -1421,7 +1421,7 @@ families_for_changed_path() {
       printf '%s\n' session-bootstrap
       ;;
     bin/fm-secondmate*|bin/fm-remote*|bin/fm-on.sh|bin/fm-home-seed.sh|\
-    bin/fm-local-delivery-lib.sh|bin/fm-local-ready.sh|bin/fm-validation-coordinate.sh|\
+    bin/fm-local-delivery-lib.sh|bin/fm-local-ready.sh|bin/fm-local-refresh.sh|bin/fm-validation-coordinate.sh|\
     bin/fm-backlog-handoff.sh|bin/fm-backlog-receive.sh|bin/fm-procevent-remote-reply.sh|\
     bin/fm-config-inherit-lib.sh|bin/fm-config-push.sh|bin/fm-shared*|\
     bin/fm-stow-cascade.sh)

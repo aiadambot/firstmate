@@ -368,7 +368,10 @@ EOF
       echo "error: local-only handoff requires a valid local parent binding for secondmate $id" >&2
       return 1
     }
-  parent_home=$(resolved_existing_dir "$FM_SECONDMATE_PARENT_HOME") || return 1
+  parent_home=$(resolved_existing_dir "$FM_SECONDMATE_PARENT_HOME") || {
+    echo "error: recorded parent home for secondmate $id does not resolve to an existing directory" >&2
+    return 1
+  }
   [ "$parent_home" = "$(resolved_existing_dir "$FM_HOME")" ] || {
     echo "error: secondmate $id is bound to parent $parent_home, not active parent $(resolved_existing_dir "$FM_HOME")" >&2
     return 1
@@ -380,13 +383,22 @@ EOF
     return 1
   }
   expected_source=$(cd "$source" && pwd -P)
-  expected_git_dir=$(fm_local_gitdir "$source" 2>/dev/null) || return 1
-  source_top=$(git -C "$source" rev-parse --show-toplevel 2>/dev/null) || return 1
+  expected_git_dir=$(fm_local_gitdir "$source" 2>/dev/null) || {
+    echo "error: local-only parent project $project has no resolvable git directory" >&2
+    return 1
+  }
+  source_top=$(git -C "$source" rev-parse --show-toplevel 2>/dev/null) || {
+    echo "error: local-only parent project $project is not inside a git worktree" >&2
+    return 1
+  }
   [ "$(cd "$source_top" && pwd -P)" = "$expected_source" ] || {
     echo "error: local-only parent project $project is nested inside another git worktree" >&2
     return 1
   }
-  child_top=$(git -C "$child" rev-parse --show-toplevel 2>/dev/null) || return 1
+  child_top=$(git -C "$child" rev-parse --show-toplevel 2>/dev/null) || {
+    echo "error: local-only project $project in secondmate $id is not inside a git worktree" >&2
+    return 1
+  }
   [ "$(cd "$child_top" && pwd -P)" = "$(cd "$child" && pwd -P)" ] || {
     echo "error: local-only project $project in secondmate $id is nested inside another git worktree" >&2
     return 1
