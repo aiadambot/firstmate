@@ -67,6 +67,7 @@ printf 'ios\n' > "$REMOTE/.fm-secondmate-home"
 cat > "$PARENT/data/secondmates.md" <<EOF
 - ios - iOS delivery (host: remote-mac; root: $REMOTE_ROOT; home: $REMOTE; scope: iOS work; projects: alpha; added 2026-08-02)
 EOF
+printf '%s\n' '- alpha [no-mistakes] - iOS project (added 2026-08-02)' > "$PARENT/data/projects.md"
 cat > "$PARENT/state/ios.meta" <<EOF
 window=fm-remote:w1:p1
 endpoint_task_id=ios
