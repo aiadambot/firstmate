@@ -69,6 +69,13 @@
 # local-only projects additionally accept work merged into the local default
 # branch (firstmate performs that merge after configured approval) as a fallback
 # for the common case where there is no remote at all.
+# For a local-only child in a seeded secondmate home none of those proofs apply:
+# the child clone's default branch and remote reachability cannot prove parent
+# landing, so teardown requires the retained parent landing receipt owned by
+# bin/fm-local-delivery-lib.sh.
+# A missing worker checkout refuses outright, and a worktree slot reassigned to
+# another task is left untouched unless a retained ready identity carries a
+# matching receipt.
 # Scout tasks (kind=scout in meta) carve out of that check: their worktree is
 # declared scratch and the report at data/<task-id>/report.md is the work
 # product. Teardown proceeds only once the report exists and the shared
