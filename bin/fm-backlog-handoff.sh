@@ -24,7 +24,9 @@
 #     archiving;
 #   - allowing a local-only item only on a local route whose registered project,
 #     parent binding, and nonpublishing seed identity all match; remote routes
-#     refuse local-only items before staging;
+#     refuse local-only items before staging, and refuse any item whose
+#     (repo: ...) annotation is missing or names a project not registered in
+#     data/projects.md, because a remote handoff requires a resolved project;
 #   - the multi-key classification and idempotent per-key reporting: a key
 #     already present in the secondmate backlog is reported and skipped, and if
 #     any key matches neither backlog nothing is moved;
