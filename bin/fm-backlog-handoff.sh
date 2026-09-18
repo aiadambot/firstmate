@@ -330,6 +330,11 @@ backlog_key_repo() {
   ' "$file"
 }
 
+project_registered() { # <project>
+  [ -f "$DATA/projects.md" ] || return 1
+  awk -v n="$1" '$1=="-" && $2==n { found=1; exit } END { exit !found }' "$DATA/projects.md"
+}
+
 registry_has_project() {
   local id=$1 project=$2 projects entry
   projects=$(secondmate_registry_field "$REG" "$id" projects 2>/dev/null || true)
@@ -350,6 +355,11 @@ validate_local_only_item_route() { # <secondmate-id> <backlog> <key> <remote:0|1
     echo "error: refusing to hand off item $key to remote secondmate $id: item has no (repo: ...) annotation; remote handoffs require a resolved project" >&2
     return 1
   fi
+  project_registered "$project" || {
+    [ "$remote" = 0 ] && return 0
+    echo "error: refusing to hand off item $key to remote secondmate $id: project $project is not registered in data/projects.md; remote handoffs require a resolved project" >&2
+    return 1
+  }
   read -r mode _ <<EOF
 $(FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" "$FM_ROOT/bin/fm-project-mode.sh" "$project" 2>/dev/null)
 EOF

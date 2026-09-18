@@ -149,6 +149,28 @@ EOF
   pass "remote routes refuse unannotated items before staging"
 }
 
+test_remote_unknown_project_handoff_is_refused_before_staging() {
+  local home="$TMP_ROOT/remote-unknown-main" remote_home=/srv/firstmate-unknown
+  mkdir -p "$home/data" "$home/state"
+  printf '%s\n' '- alpha [local-only] - local project (added 2026-09-14)' > "$home/data/projects.md"
+  printf -- '- remote - remote route (host: lab; root: /srv/firstmate-code; home: %s; scope: local work; projects: alpha; added 2026-09-14)\n' \
+    "$remote_home" > "$home/data/secondmates.md"
+  cat > "$home/data/backlog.md" <<'EOF'
+## Queued
+- [ ] remote-unknown - annotation names no registered project (repo: alpa)
+
+## Done
+EOF
+  if FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" "$ROOT/bin/fm-backlog-handoff.sh" remote remote-unknown >"$TMP_ROOT/remote-unknown.out" 2>&1; then
+    fail "remote handoff accepted an item annotated with an unregistered project"
+  fi
+  assert_grep 'not registered in data/projects.md' "$TMP_ROOT/remote-unknown.out" \
+    "remote unknown-project refusal was not explained"
+  assert_grep 'remote-unknown' "$home/data/backlog.md" "remote unknown-project refusal changed the parent backlog"
+  assert_absent "$home/data/handoff/remote.outbox.md" "remote unknown-project refusal staged an outbox"
+  pass "remote routes refuse items whose annotation names no registered project"
+}
+
 inbox_body_stream() { # <state-dir> <task-id>
   local rec
   for rec in "$1/$2.inbox"/*.msg; do
@@ -1458,6 +1480,7 @@ test_handoff_wakes_live_local_receiver
 test_local_only_handoff_requires_bound_local_project
 test_remote_local_only_handoff_is_refused_before_staging
 test_remote_unannotated_handoff_is_refused_before_staging
+test_remote_unknown_project_handoff_is_refused_before_staging
 test_failed_wake_retries_when_the_item_is_already_present
 test_known_receiver_failure_remains_retryable_after_grace
 test_known_failure_restores_retry_after_reconciliation_race
