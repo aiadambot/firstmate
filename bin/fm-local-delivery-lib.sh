@@ -217,6 +217,7 @@ fm_local_refresh() ( # child-home task-id
   local child=$1 task=$2 lock tmp='' base clone_default imported
   fm_local_context "$child" "$task" || { fm_local_error 'invalid child task or parent/project binding'; exit 1; }
   lock="$FM_LOCAL_CHILD/state/.control-$task.lock"
+  # shellcheck disable=SC2329 # Registered by the EXIT trap below.
   local_refresh_cleanup() {
     [ -z "$tmp" ] || rm -rf -- "$tmp"
     fm_lock_release "$lock" || true
@@ -260,6 +261,7 @@ fm_local_land() ( # parent-home mate-id task-id approved-full-head
     && [ -z "${FM_TASK_ID:-}" ] || { fm_local_error 'only the parent firstmate may land'; exit 1; }
   registry_lock="$parent/state/.secondmate-registry.lock"
   lock='' project_lock=''
+  # shellcheck disable=SC2329 # Registered by the EXIT trap below.
   local_land_cleanup() {
     [ -z "$tmp" ] || rm -f -- "$tmp"
     [ -z "$project_lock" ] || fm_lock_release "$project_lock" || true

@@ -69,13 +69,16 @@
 # local-only projects additionally accept work merged into the local default
 # branch (firstmate performs that merge after configured approval) as a fallback
 # for the common case where there is no remote at all.
-# For a local-only child in a seeded secondmate home none of those proofs apply:
-# the child clone's default branch and remote reachability cannot prove parent
-# landing, so teardown requires the retained parent landing receipt owned by
+# For a local-only child in a seeded secondmate home whose durable parent
+# record names route=local none of those proofs apply: the child clone's
+# default branch and remote reachability cannot prove parent landing, so
+# teardown requires the retained parent landing receipt owned by
 # bin/fm-local-delivery-lib.sh.
 # A missing worker checkout refuses outright, and a worktree slot reassigned to
 # another task is left untouched unless a retained ready identity carries a
-# matching receipt.
+# matching receipt. Remote-route and pre-record legacy secondmate homes keep
+# the generic proofs: bin/fm-local-delivery-lib.sh refuses local delivery
+# there, so no retained landing receipt can ever exist for them.
 # Scout tasks (kind=scout in meta) carve out of that check: their worktree is
 # declared scratch and the report at data/<task-id>/report.md is the work
 # product. Teardown proceeds only once the report exists and the shared
@@ -1726,8 +1729,11 @@ validate_worktree_teardown_safety() {
     secondmate|scout) return 0 ;;
   esac
 
-  if [ "$MODE" = local-only ] && { [ -e "$FM_HOME/.fm-secondmate-home" ] || [ -L "$FM_HOME/.fm-secondmate-home" ]; }; then
-    # A child clone's default or remote reachability cannot prove parent landing.
+  if [ "$MODE" = local-only ] && [ "${PARENT_ROUTE:-}" = local ]; then
+    # A child clone's default or remote reachability cannot prove parent
+    # landing. The receipt proof exists only under a route=local durable
+    # record; remote-route and pre-record legacy homes can never hold
+    # local-delivery work, so they fall through to the generic proofs below.
     # shellcheck source=bin/fm-local-delivery-lib.sh
     . "$SCRIPT_DIR/fm-local-delivery-lib.sh"
     fm_local_landed "$FM_HOME" "$ID" || {
@@ -3293,7 +3299,7 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ] &&
 fi
 
 if [ "$KIND" = ship ] && [ "$MODE" = local-only ] && [ "$FORCE" != "--force" ] \
-    && { [ -e "$FM_HOME/.fm-secondmate-home" ] || [ -L "$FM_HOME/.fm-secondmate-home" ]; } \
+    && [ "${PARENT_ROUTE:-}" = local ] \
     && { [ ! -d "$WT" ] || ! teardown_owns_worktree; }; then
   if teardown_owns_worktree; then
     echo "REFUSED: local-only child $ID has no inspectable worker checkout; cannot prove parent landing." >&2

@@ -922,10 +922,14 @@ test_secondmate_teardown_durable_record_with_unknown_field_succeeds() {
   fm_write_meta "$parent/state/mate.meta" "kind=secondmate" "home=$child"
   fm_git_init_commit "$child/projects/worktree"
   printf 'manual\n' > "$child/config/backlog-backend"
+  # A local-only ship in this route=local seeded home now owes a parent landing
+  # receipt at teardown; this regression covers durable parent resolution, not
+  # local delivery, so the fixture ships no-mistakes, where the clean
+  # on-default worktree proves landed through the no-PR content check.
   fm_write_meta "$child/state/work-clean.meta" \
     "window=firstmate:fm-work-clean" "endpoint_task_id=work-clean" \
     "worktree=$child/projects/worktree" "project=$child/projects/worktree" \
-    "kind=ship" "mode=local-only" "spawn_gen=public-followup-fixture"
+    "kind=ship" "mode=no-mistakes" "spawn_gen=public-followup-fixture"
 
   rc=0
   out=$(PATH="$child/fakebin:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$child" \
