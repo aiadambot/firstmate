@@ -887,7 +887,7 @@ remote_handoff() { # <secondmate-id> <keys...>
   for key in "${requested[@]}"; do
     if backlog_key_section "$outbox" "$key" >/dev/null 2>&1; then
       validate_local_only_item_route "$id" "$outbox" "$key" 1 || return 1
-    else
+    elif backlog_key_section "$MAIN_BACKLOG" "$key" >/dev/null 2>&1; then
       validate_local_only_item_route "$id" "$MAIN_BACKLOG" "$key" 1 || return 1
     fi
   done

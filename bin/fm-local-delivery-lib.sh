@@ -236,7 +236,8 @@ fm_local_refresh() ( # child-home task-id
       || { fm_local_error 'child default diverged from the parent default; nothing was moved'; exit 1; }
     tmp=$(mktemp -d "$FM_LOCAL_CHILD/data/$task/.refresh.XXXXXX")
     # Local object transfer only: no remote, no refspec, no FETCH_HEAD.
-    git -C "$FM_LOCAL_PROJECT" bundle create "$tmp/default.bundle" "$clone_default..refs/heads/$FM_LOCAL_DEFAULT" >/dev/null 2>&1 || exit 1
+    git -C "$FM_LOCAL_PROJECT" bundle create "$tmp/default.bundle" "$clone_default..refs/heads/$FM_LOCAL_DEFAULT" >/dev/null 2>&1 \
+      || { fm_local_error 'could not pack the parent default advance; nothing was moved'; exit 1; }
     git -C "$FM_LOCAL_CLONE" bundle verify "$tmp/default.bundle" >/dev/null || exit 1
     imported=$(git -C "$FM_LOCAL_CLONE" bundle unbundle "$tmp/default.bundle") || exit 1
     [ "$imported" = "$base refs/heads/$FM_LOCAL_DEFAULT" ] || exit 1
