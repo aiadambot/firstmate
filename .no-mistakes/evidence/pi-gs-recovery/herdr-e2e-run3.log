@@ -1,0 +1,20 @@
+FM_TEST_BEGIN 2026-09-18T15:34:26Z tests/fm-send-secondmate-marker-herdr-e2e.test.sh family=live-harness-optin expected_gate_skip=live-capability
+evidence: lab=fm-lab-fm-send-secondma-4119359-11700 pi=0.85.0
+{"client":{"version":"0.8.2-preview.2026-08-31-b1ff4582e968","channel":"preview","protocol":21,"binary":"/home/aldavies88/.local/bin/herdr","session":"fm-lab-fm-send-secondma-4119359-11700"},"server":{"status":"running","running":true,"version":"0.8.2-preview.2026-08-31-b1ff4582e968","protocol":21,"capabilities":{"live_handoff":true,"detached_server_daemon":false},"compatible":true,"socket":"/home/aldavies88/.config/herdr/sessions/fm-lab-fm-send-secondma-4119359-11700/herdr.sock","session":"fm-lab-fm-send-secondma-4119359-11700","restart_needed":false},"update":{"restart_needed":false}}
+warning: secondmate marker-pi-sm sync skipped before launch: primary default-branch commit cannot be resolved
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  repair a missing or failed watcher cycle with the Pi tool fm_watch_arm_pi, or restart Pi with -e /home/aldavies88/.no-mistakes/worktrees/05c46ec27b65/01M2TDAJ9CEDWDVNHNZBQWA9WP/.pi/extensions/fm-primary-turnend-guard.ts -e /home/aldavies88/.no-mistakes/worktrees/05c46ec27b65/01M2TDAJ9CEDWDVNHNZBQWA9WP/.pi/extensions/fm-primary-pi-watch.ts if the extensions are not loaded.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+evidence: doorbell-received-hex=3a2046697273746d61746520696e737472756374696f6e2077616974696e673a206c69737420272f746d702f666d2d73656e642d6d61726b65722d68657264722d6532652e5a6c475335562f73656e6465722d686f6d652f73746174652f6d61726b65722d70692d736d2e696e626f78272f2a2e6d736720616e642c20696e206e756d65726963206f726465722c207265616420616e6420616374206f6e20656163682c207468656e206d7620656163682068616e646c65642066696c6520746f20272f746d702f666d2d73656e642d6d61726b65722d68657264722d6532652e5a6c475335562f73656e6465722d686f6d652f73746174652f6d61726b65722d70692d736d2e696e626f78272f68616e646c65642f2e
+evidence: durable-request-hex=5b666d2d66726f6d2d66697273746d6174655de281a3636f72723d6132313136613066323465333832323920464d5f4d41524b45525f48455244525f4532452065786163742d69642072657175657374
+ok - real Pi/Herdr: exact-id FM_HOME send delivers the doorbell and retains exactly one routed marker
+evidence: direct-input received-hex=464d5f4d41524b45525f48455244525f444952454354206361707461696e20696e707574
+ok - real Pi/Herdr: direct captain terminal input stays unmarked
+FM_TEST_END 2026-09-18T15:35:45Z tests/fm-send-secondmate-marker-herdr-e2e.test.sh exit=0 duration_ms=78462 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=78532
+FM_TEST_SUMMARY_FAMILY family=live-harness-optin count=1 duration_ms=78462 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-send-secondmate-marker-herdr-e2e.test.sh duration_ms=78462
